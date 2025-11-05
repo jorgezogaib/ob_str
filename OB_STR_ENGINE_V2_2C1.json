@@ -1,0 +1,208 @@
+{
+  "meta": {
+    "engineVersion": "2.2C.1",
+    "createdUtc": "2025-11-03T05:02:01.267131Z",
+    "description": "Orange Beach STR \u2013 V2 MVP engine (stop at readiness for second purchase)",
+    "upgradedUtc": "2025-11-03T15:02:01.640195Z",
+    "notes": [
+      "V2.1: Adds 3% annual compounding escalation for insurance & property tax starting 12 months after purchase.",
+      "V2.1B: Reserve behavior aligned to DOCX \u2014 Rainy & CapEx funded up to monthly caps; surplus to feeder prepay.",
+      "V2.2: Added infrastructure for CapEx spend events (recurring and one-time), funds-gated by CapEx balance. No default events.",
+      "V2.2C.1: Add HOA inflation; other interest/reserve policies unchanged"
+    ],
+    "calibrationUtc": "2025-11-03T05:49:22.274103Z",
+    "calibrationNote": "Target yield recalibrated to match market parity (P=600,000) \u2192 6.44% unlevered.",
+    "revision": "HOA inflation applied annually each January (hoaInflationRate)",
+    "schemaVersion": "2.2"
+  },
+  "calendar": {
+    "periodicity": "monthly",
+    "periodsPerYear": 12,
+    "startMonth": 1,
+    "monthlyDays": [
+      31,
+      28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31
+    ]
+  },
+  "constants": {
+    "financial": {
+      "startingCash": 5000.0,
+      "annualSavings": 50000.0,
+      "amortizationYears": 30
+    },
+    "operations": {
+      "adrBaseline2BR": 375.0,
+      "occupancyBaseline": 0.58,
+      "mgmtPct": 0.15,
+      "capexPct": 0.05,
+      "hoaAnnual": 6876.0,
+      "insuranceRate": 0.005,
+      "propertyTaxRate": 0.01,
+      "hoaInflationRate": 0.02
+    },
+    "acquisition": {
+      "closingCostPct": 0.03,
+      "downPaymentFirst": 0.2,
+      "downPaymentSubsequent": 0.2,
+      "targetYieldUnlevered": 0.0644
+    },
+    "debt": {
+      "mortgageRate": 0.065
+    },
+    "reserves": {
+      "capexMonthsTarget": 6
+    }
+  },
+  "banking": {
+    "seasoningMonths": 12,
+    "advanceRate": 0.9,
+    "cashoutCostPct": 0.03,
+    "initialBufferMonths": 3,
+    "initialCapExBufferMonths": 0,
+    "opsCashFloorMonths": 1,
+    "rainyScope": [
+      "DS",
+      "HOA"
+    ],
+    "rainyCoverageMonths": 5,
+    "rainyTopUpPolicy": "topUpOnlyWhenTargetIncreases"
+  },
+  "policies": {
+    "readiness": {
+      "exclude": [
+        "RainyBalance",
+        "CapexBalance",
+        "OpsCashFloor"
+      ],
+      "stopWhenReadyForNextPurchase": true
+    },
+    "escalation": {
+      "taxInsurance": {
+        "annualPct": 0.03,
+        "compounding": true,
+        "startAfterPurchaseMonths": 12,
+        "applyTo": [
+          "insuranceRate",
+          "propertyTaxRate"
+        ]
+      }
+    },
+    "reserves": {
+      "rainy": {
+        "targetFormula": "rainyCoverageMonths * (DS + HOA)",
+        "monthlyCapFormula": "annualTarget / 12",
+        "topUpOnlyWhenTargetIncreases": true
+      },
+      "capex": {
+        "annualTargetFormula": "capexMonthsTarget * (ADR * 365 * Occupancy * capexPct)",
+        "monthlyCapFormula": "annualTarget / 12",
+        "applyOpAllocationAgainstMonthlyCap": true,
+        "surplusDestination": "feederPrepay",
+        "spend": {
+          "executionOrder": "byPriorityThenFIFO",
+          "allowPartial": false,
+          "maxEventsPerMonth": 1
+        }
+      },
+      "ops": {
+        "cashFloorFormula": "opsCashFloorMonths * (DS + HOA)",
+        "enforcement": "endCash >= cashFloor"
+      }
+    },
+    "reserveFundingOrder": [
+      "rainy",
+      "capex"
+    ],
+    "feederPrepayUsesSurplusAfterReservesAndOpsFloor": true
+  },
+  "behaviorTree": [
+    {
+      "node": "depositSavingsMonthly",
+      "frequency": "monthly",
+      "amount": "annualSavings / 12"
+    },
+    {
+      "node": "evaluateReadinessStop",
+      "frequency": "monthly",
+      "condition": "combinedReadiness >= nextPurchaseThreshold"
+    }
+  ],
+  "reports": {
+    "CashLedgerMonthly": {
+      "columns": [
+        "YYYY-MM",
+        "Starting Cash",
+        "Savings In",
+        "Ops Net",
+        "Reserve Top-Up (Rainy)",
+        "Reserve Top-Up (CapEx)",
+        "Feeder Prepay",
+        "Purchase Out",
+        "Ending Cash",
+        "Ops Cash Floor",
+        "Rainy Balance",
+        "CapEx Balance"
+      ]
+    },
+    "OpsKPIsMonthly": {
+      "columns": [
+        "YYYY-MM",
+        "ADR",
+        "Occupancy",
+        "NOI",
+        "DSCR",
+        "Unit Events"
+      ]
+    },
+    "InvestorReportAnnual": {
+      "columns": [
+        "Year",
+        "Units",
+        "Revenue",
+        "NOI",
+        "Debt Service",
+        "Cash Flow",
+        "Ending Cash"
+      ]
+    },
+    "GovernancePerDoor": {
+      "columns": [
+        "YYYY-MM",
+        "Unit",
+        "DSCR",
+        "LTV",
+        "Cooldown",
+        "Notes"
+      ]
+    }
+  },
+  "invariants": {
+    "postEventCoverageMin": 1.0,
+    "noRefiWithoutPurchase": true,
+    "noPurchaseUntilCapital": true,
+    "RefiBridgesOnly": true
+  },
+  "calibration": {
+    "method": "marketParity",
+    "targetMarketPrice": 600000,
+    "derivedTargetYield": 0.0644,
+    "parityFormula": "P = (ADR*365*Occ - (ADR*365*Occ*(mgmt+capex)+HOA)) / (targetYield + ins + tax)",
+    "notes": [
+      "Calibrated so parity price aligns with Orange Beach 2BR observed market (~$600k).",
+      "All other parameters unchanged from V2.1 InstitutionalRealism."
+    ]
+  },
+  "events": {
+    "capexPlan": []
+  }
+}
