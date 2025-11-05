@@ -1,0 +1,37 @@
+{
+  "version": "V2_3",
+  "created_at_utc": "2025-11-05T20:30:48Z",
+  "engine": {
+    "path": "OB_STR_ENGINE_V2_3.json",
+    "sha256": "<fill_after_run>"
+  },
+  "runner": {
+    "path": "run_suite_full_V23.py",
+    "sha256": "<fill_after_run>"
+  },
+  "outputs": {
+    "monthly_csv": {
+      "path": "V2_3_Monthly.csv",
+      "sha256": "<fill_after_run>"
+    },
+    "yoy_csv": {
+      "path": "V2_3_YearOverYear.csv",
+      "sha256": "<fill_after_run>"
+    }
+  },
+  "tests": [
+    {
+      "id": "T-DS-1",
+      "result": "<PASS/FAIL>"
+    },
+    {
+      "id": "T-AMORT-1",
+      "result": "<PASS/FAIL>"
+    },
+    {
+      "id": "T-CASH-1",
+      "result": "<PASS/FAIL>"
+    }
+  ],
+  "notes": "Fill hashes from Codex run; attach stdout."
+}
