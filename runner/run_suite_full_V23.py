@@ -204,3 +204,10 @@ if __name__ == "__main__":
         with OUT_YOY.open("w",newline="") as f:
             w=csv.DictWriter(f, fieldnames=cols); w.writeheader(); w.writerows(out)
     print("DONE")
+
+import subprocess, pathlib, sys
+# Auto-commit the generated CSVs
+subprocess.run(
+    [sys.executable, str(pathlib.Path(__file__).with_name("commit_results.py"))],
+    check=False
+)
