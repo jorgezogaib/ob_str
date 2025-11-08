@@ -1,0 +1,5 @@
+YYYY-MM,Starting Cash,Savings In,Gross Revenue,Mgmt Expense,CapEx Operating,HOA,Insurance,Property Tax,Debt Service (Total),Scheduled Principal,Interest Portion,Ops Net,Feeder Prepay,Purchase: Down Payment,Purchase: Closing Costs,Purchase: Initial Rainy Funding,Purchase Out (Total),New Loan Principal,Loan Balance (End),End Cash
+Year 1,335000.0,50000.04,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,920383.68,138057.6,0.0,0.0,0.0,0.0,55000.0
+Year 2,601076.26,50000.04,21807.5,4361.5,1090.36,3502.0,887.76,1141.4,0.0,0.0,0.0,10824.48,0.0,608741.6,91311.2,0.0,87506.6,304370.79,0.0,28317.88
+Year 3,699879.14,50000.04,65243.75,13048.75,3262.15,10821.12,2663.28,3424.2,0.0,0.0,0.0,32024.25,0.0,0.0,0.0,0.0,0.0,0.0,0.0,94031.16
+Year 4,1041302.38,37500.03,48798.75,9759.75,2439.91,8359.38,1997.46,2568.15,0.0,0.0,0.0,23674.11,0.0,0.0,0.0,0.0,0.0,0.0,0.0,142965.4
