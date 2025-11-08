@@ -1,11 +1,40 @@
-import os, json, csv, math
+# run_suite_full_V23.py  — portable paths + small QoL
+
+import os, sys, json, csv, math
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 
-ENGINE = Path("/mnt/data/OB_STR_ENGINE_V2_3.json")
-OUT_MONTHLY = Path("/mnt/data/V2_3_Monthly.csv")
-OUT_YOY     = Path("/mnt/data/V2_3_YearOverYear.csv")
-MAX_MONTHS = 240
+# -------- PATHS (portable) --------
+# Priority: CLI args -> ENV -> sane defaults
+def _argv_flag(name, default=None):
+    try:
+        ix = sys.argv.index(name)
+        return sys.argv[ix + 1]
+    except Exception:
+        return default
+
+REPO_ROOT = Path(__file__).resolve().parent.parent  # …/ob_str
+DEFAULT_ENGINE = REPO_ROOT / "engines" / "OB_STR_ENGINE_V2_3.json"
+DEFAULT_OUT_MONTHLY = REPO_ROOT / "runner" / "V2_3_Monthly.csv"
+DEFAULT_OUT_YOY     = REPO_ROOT / "runner" / "V2_3_YearOverYear.csv"
+
+ENGINE = Path(
+    _argv_flag("--engine",
+        os.getenv("ENGINE_PATH", str(DEFAULT_ENGINE))
+    )
+)
+OUT_MONTHLY = Path(
+    _argv_flag("--out-monthly",
+        os.getenv("OUT_MONTHLY", str(DEFAULT_OUT_MONTHLY))
+    )
+)
+OUT_YOY = Path(
+    _argv_flag("--out-yoy",
+        os.getenv("OUT_YOY", str(DEFAULT_OUT_YOY))
+    )
+)
+
+MAX_MONTHS = int(os.getenv("MAX_MONTHS", "240"))
 
 def cents(x):
     return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -45,8 +74,20 @@ class Loan:
             self.n_left = 0
         return amt
 
+def _find_engine(p: Path) -> Path:
+    # Try exact, then repo-relative fallbacks
+    candidates = [
+        p,
+        DEFAULT_ENGINE,
+        REPO_ROOT / "OB_STR_ENGINE_V2_3.json",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError(f"Engine not found. Tried: {', '.join(str(c) for c in candidates)}")
+
 def load_eng(p: Path):
-    assert p.exists(), f"Engine not found at {p}"
+    p = _find_engine(p)
     return json.loads(p.read_text())
 
 def parity_price(ADR,OCC,HOA_Y,MGMT,CAPX,INS,TAX,TARGET):
@@ -92,7 +133,7 @@ def simulate(e, mmax=MAX_MONTHS):
         ops_net = ops_gross - (ops_mgmt + ops_capex + ops_hoa + ops_ins + ops_tax + ds_total)
         cash_prefeeder = cash + savings_in + ops_net
 
-        # ---- Purchase ----
+        # ---- Purchase gate ----
         purchase=False; pur_dp=pur_cl=pur_rainy=0.0; pur_total=0.0; new_loan_principal=0.0
         if len(units) < portfolio.get("maxLoans",7) and price_par>0:
             down_frac = DOWN1 if len(units)==0 else DOWNN
@@ -110,7 +151,7 @@ def simulate(e, mmax=MAX_MONTHS):
                 units.append({"id":f"U{next_unit_id}","price":price_par,"loan":Loan(f"U{next_unit_id}", loan_pf, RATE, amort_yrs)})
                 next_unit_id += 1
 
-        # ---- Feeder ----
+        # ---- Feeder (post-purchase) ----
         feeder=0.0
         if len(units)>0:
             feeder_eligible = max(cash_prefeeder, 0.0)
@@ -143,7 +184,8 @@ def simulate(e, mmax=MAX_MONTHS):
             "Purchase Out (Total)": round(pur_total,2),
             "New Loan Principal": round(new_loan_principal,2),
             "Loan Balance (End)": round(sum(u["loan"].balance for u in units),2),
-            "End Cash": round(end_cash,2)
+            "End Cash": round(end_cash,2),
+            "Units Owned": len(units)
         })
 
         cash = end_cash
@@ -153,8 +195,10 @@ def simulate(e, mmax=MAX_MONTHS):
 
 if __name__ == "__main__":
     print("CWD:", os.getcwd())
-    print("Engine path:", ENGINE, "exists:", ENGINE.exists())
-    print("Will write:", OUT_MONTHLY, OUT_YOY)
+    print("ENGINE:", ENGINE)
+    print("OUT_MONTHLY:", OUT_MONTHLY)
+    print("OUT_YOY:", OUT_YOY)
+
     e = load_eng(ENGINE)
     rows = simulate(e, mmax=MAX_MONTHS)
 
@@ -166,7 +210,7 @@ if __name__ == "__main__":
         elif purchase_seen and r["Debt Service (Total)"]>0: ds_pos=True; break
     assert ds_pos, "T-DS-1 FAIL: no DS>0 after purchase"
 
-    # T-AMORT-1: prev_end - principal - feeder + new_loan = curr_end (±0.01)
+    # T-AMORT-1: prev_end - principal - feeder + new_loan == curr_end (±0.01)
     for i in range(1,len(rows)):
         prev, curr = rows[i-1], rows[i]
         lhs = cents(prev["Loan Balance (End)"]) - cents(curr["Scheduled Principal"]) - cents(curr["Feeder Prepay"]) + cents(curr.get("New Loan Principal",0.0))
@@ -180,12 +224,16 @@ if __name__ == "__main__":
               - cents(r["Feeder Prepay"]) - cents(r["Purchase Out (Total)"]))
         assert abs(lhs - rhs) <= Decimal("0.01"), f"T-CASH-1 FAIL {r['YYYY-MM']}"
 
-    # Write outputs
+    # ---- Write outputs
+    OUT_MONTHLY.parent.mkdir(parents=True, exist_ok=True)
+    OUT_YOY.parent.mkdir(parents=True, exist_ok=True)
+
     if rows:
         cols=list(rows[0].keys())
         with OUT_MONTHLY.open("w",newline="") as f:
             w=csv.DictWriter(f, fieldnames=cols); w.writeheader(); w.writerows(rows)
-        # simple YOY rollup
+
+        # YOY rollup
         from collections import defaultdict
         agg, last_by_year = defaultdict(lambda:{k:Decimal("0.00") for k in cols}), {}
         for r in rows:
@@ -199,15 +247,9 @@ if __name__ == "__main__":
             a=agg[y]; last=last_by_year[y]
             row={k:(float(a[k]) if isinstance(a[k],Decimal) else a[k]) for k in a}
             row["YYYY-MM"]=f"Year {y}"; row["UnitID"]="TOTAL"
-            for k in ["End Cash","Loan Balance (End)"]: row[k]=last[k]
+            for k in ["End Cash","Loan Balance (End)"]:
+                row[k]=last[k]
             out.append(row)
         with OUT_YOY.open("w",newline="") as f:
             w=csv.DictWriter(f, fieldnames=cols); w.writeheader(); w.writerows(out)
     print("DONE")
-
-import subprocess, pathlib, sys
-# Auto-commit the generated CSVs
-subprocess.run(
-    [sys.executable, str(pathlib.Path(__file__).with_name("commit_results.py"))],
-    check=False
-)
