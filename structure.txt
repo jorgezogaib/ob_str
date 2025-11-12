@@ -1,0 +1,68 @@
+.
+├── .github
+│   └── workflows
+│       └── ci.yml
+├── .pytest_cache
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   ├── README.md
+│   └── v
+│       └── cache
+│           ├── lastfailed
+│           └── nodeids
+├── .streamlit
+│   └── config.toml
+├── Makefile
+├── OB_STR_ENGINE_V2_3.MVP.json
+├── Orange Beach Investment Master Plan V6.3.docx
+├── README_RUN.txt
+├── app.py
+├── app_data
+├── archive
+│   ├── OB_STR_ENGINE_V2_3.json
+│   ├── OB_STR_ENGINE_V2_3__uploaded.json
+│   ├── V2_3_MVP_Manifest.template.json
+│   ├── V2_3_Monthly.csv
+│   ├── V2_3_YearOverYear.csv
+│   ├── install_injection_only.sh
+│   ├── install_mvp_v23.sh
+│   ├── install_reserve_sweep.sh
+│   ├── ob_mvp_v23_injection_patch.zip
+│   ├── run_suite_full_V23.MVP.py
+│   ├── run_suite_full_V23.injection_only.py
+│   ├── run_suite_full_V23.py
+│   └── run_suite_full_V23.reserve_sweep.py
+├── engines
+│   └── OB_STR_ENGINE_V2_3.json
+├── requirements.txt
+├── runner
+│   ├── V2_3_Monthly.csv
+│   ├── V2_3_YearOverYear.csv
+│   └── run_suite_full_V23.py
+├── schema
+│   └── engine_v2_3.json
+├── structure.txt
+├── tests
+│   ├── .pytestignore
+│   ├── conftest.py
+│   ├── diag
+│   │   └── test_diagnostics.py
+│   ├── fuzz
+│   │   └── test_edges.py
+│   ├── integration
+│   │   ├── test_identities.py
+│   │   └── test_reserves_liquidity.py
+│   ├── io
+│   │   └── test_csv_schema.py
+│   ├── perf
+│   │   └── test_runtime_smoke.py
+│   ├── policy
+│   │   └── test_purchase_gate.py
+│   ├── schema
+│   │   └── test_engine_schema.py
+│   └── unit
+│       └── test_primitives.py
+└── ui
+    └── diagnostics.py
+
+22 directories, 44 files
