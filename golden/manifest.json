@@ -1,0 +1,8 @@
+{
+  "engine_version": "2.3-MVP",
+  "engine_path": "engines/OB_STR_ENGINE_V2_3.json",
+  "rows_captured": {
+    "monthly_first12": 12,
+    "yoy_first3": 3
+  }
+}
