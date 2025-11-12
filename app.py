@@ -300,3 +300,11 @@ with save_cols[0]:
 with save_cols[1]:
     as_text = json.dumps(e, indent=2)
     st.download_button("⬇ Download edited engine.json", as_text, file_name="OB_STR_ENGINE_V2_3_EDITED.json", mime="application/json")
+
+# app.py snippet
+import streamlit as st
+from ui.diagnostics_panel import render as render_diagnostics
+
+st.sidebar.header("Panels")
+if st.sidebar.checkbox("Diagnostics", value=True):
+    render_diagnostics(st, "engines/OB_STR_ENGINE_V2_3.json", "runner/V2_3_Monthly.csv")
