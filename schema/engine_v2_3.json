@@ -1,0 +1,172 @@
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OB_STR Engine v2.3",
+  "type": "object",
+  "required": ["version","constants","calendar","policies","startingBalances","banking","savings","lending","portfolio","market"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^2\\.3(-.*)?$" },
+    "constants": {
+      "type": "object",
+      "required": ["financial","operations","acquisition","debt","reserves"],
+      "additionalProperties": false,
+      "properties": {
+        "financial": {
+          "type": "object",
+          "required": ["startingCash","annualSavings","amortizationYears"],
+          "additionalProperties": false,
+          "properties": {
+            "startingCash": { "type": "number" },
+            "annualSavings": { "type": "number" },
+            "amortizationYears": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "operations": {
+          "type": "object",
+          "required": ["adrBaseline2BR","occupancyBaseline","mgmtPct","capexPct","hoaAnnual","hoaInflationRate","insuranceRate","propertyTaxRate"],
+          "additionalProperties": false,
+          "properties": {
+            "adrBaseline2BR": { "type": "number", "minimum": 0 },
+            "occupancyBaseline": { "type": "number", "minimum": 0, "maximum": 1 },
+            "mgmtPct": { "type": "number", "minimum": 0, "maximum": 1 },
+            "capexPct": { "type": "number", "minimum": 0, "maximum": 1 },
+            "hoaAnnual": { "type": "number", "minimum": 0 },
+            "hoaInflationRate": { "type": "number", "minimum": 0 },
+            "insuranceRate": { "type": "number", "minimum": 0 },
+            "propertyTaxRate": { "type": "number", "minimum": 0 }
+          }
+        },
+        "acquisition": {
+          "type": "object",
+          "required": ["downPaymentFirst","downPaymentSubsequent","closingCostPct","targetYieldUnlevered"],
+          "additionalProperties": false,
+          "properties": {
+            "downPaymentFirst": { "type": "number", "minimum": 0, "maximum": 1 },
+            "downPaymentSubsequent": { "type": "number", "minimum": 0, "maximum": 1 },
+            "closingCostPct": { "type": "number", "minimum": 0, "maximum": 1 },
+            "targetYieldUnlevered": { "type": "number", "minimum": 0 }
+          }
+        },
+        "debt": {
+          "type": "object",
+          "required": ["mortgageRate"],
+          "additionalProperties": false,
+          "properties": { "mortgageRate": { "type": "number", "minimum": 0 } }
+        },
+        "reserves": {
+          "type": "object",
+          "required": ["capexMonthsTarget"],
+          "additionalProperties": false,
+          "properties": { "capexMonthsTarget": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "required": ["monthlyDays"],
+      "additionalProperties": false,
+      "properties": {
+        "monthlyDays": {
+          "type": "array",
+          "items": { "type": "integer", "enum": [28,29,30,31] },
+          "minItems": 12,
+          "maxItems": 12
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "required": ["purchase","prepay","freeze","portfolio","debt"],
+      "additionalProperties": false,
+      "properties": {
+        "purchase": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "allowFeederForClosing": { "type": "boolean" },
+            "multiBuyPerMonth": { "type": "boolean" }
+          }
+        },
+        "prepay": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": { "tieBreak": { "type": "string" } }
+        },
+        "freeze": {
+          "type": "object",
+          "required": ["margin","exitConsecutiveMonths"],
+          "additionalProperties": false,
+          "properties": {
+            "margin": { "type": "number" },
+            "exitConsecutiveMonths": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "portfolio": {
+          "type": "object",
+          "required": ["maxUnits"],
+          "additionalProperties": true,
+          "properties": {
+            "maxUnits": { "type": "integer", "minimum": 1 },
+            "postTarget": { "type": "string", "enum": ["prepay","cash"] }
+          }
+        },
+        "debt": {
+          "type": "object",
+          "required": ["dayCount"],
+          "additionalProperties": true,
+          "properties": { "dayCount": { "type": "string", "enum": ["ACT/365"] } }
+        }
+      }
+    },
+    "startingBalances": {
+      "type": "object",
+      "required": ["HY_Unrestricted","HY_RainyReserve","HY_CapexReserve"],
+      "additionalProperties": false,
+      "properties": {
+        "HY_Unrestricted": { "type": "number", "minimum": 0 },
+        "HY_RainyReserve": { "type": "number", "minimum": 0 },
+        "HY_CapexReserve": { "type": "number", "minimum": 0 }
+      }
+    },
+    "banking": {
+      "type": "object",
+      "required": ["rainyCoverageMonths"],
+      "additionalProperties": true,
+      "properties": { "rainyCoverageMonths": { "type": "integer", "minimum": 0 } }
+    },
+    "savings": {
+      "type": "object",
+      "required": ["annualYield","prepayPct"],
+      "additionalProperties": true,
+      "properties": {
+        "annualYield": { "type": "number", "minimum": 0 },
+        "prepayPct": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "lending": {
+      "type": "object",
+      "required": ["advanceRate","targetLTV","cashoutCostPct","seasoningMonths"],
+      "additionalProperties": true,
+      "properties": {
+        "advanceRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "targetLTV": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cashoutCostPct": { "type": "number", "minimum": 0, "maximum": 1 },
+        "seasoningMonths": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "portfolio": {
+      "type": "object",
+      "required": ["maxLoans"],
+      "additionalProperties": true,
+      "properties": { "maxLoans": { "type": "integer", "minimum": 1 } }
+    },
+    "market": {
+      "type": "object",
+      "required": ["annualAppreciation"],
+      "additionalProperties": true,
+      "properties": { "annualAppreciation": { "type": "number" } }
+    }
+  },
+  "additionalProperties": true
+}
+

@@ -1,5 +1,5 @@
 {
-  "version": "V2_3",
+  "version": "2.3-MVP",
   "constants": {
     "financial": {
       "startingCash": 5000.0,
@@ -7,15 +7,14 @@
       "amortizationYears": 30
     },
     "operations": {
-      "adrBaseline2BR": 275.0,
+      "adrBaseline2BR": 350.0,
       "occupancyBaseline": 0.65,
       "mgmtPct": 0.20,
       "capexPct": 0.05,
       "hoaAnnual": 10200.0,
       "hoaInflationRate": 0.03,
-      "insuranceRate": 0.007,
-      "propertyTaxRate": 0.009,
-      "targetYieldUnlevered": 0.085
+      "insuranceRate": 0.008,
+      "propertyTaxRate": 0.009
     },
     "acquisition": {
       "downPaymentFirst": 0.20,
@@ -28,39 +27,40 @@
     },
     "reserves": {
       "capexMonthsTarget": 6
-    },
-    "banking": {
-      "initialBufferMonths": 1,
-      "initialCapExBufferMonths": 1,
-      "opsCashFloorMonths": 2,
-      "rainyCoverageMonths": 6,
-      "seasoningMonths": 6,
-      "advanceRate": 0.75,
-      "cashoutCostPct": 0.03,
-      "refiLTVTrigger": 0.75
-    },
-    "reserveYields": {
-      "rainyAnnualYield": 0.02,
-      "capexAnnualYield": 0.015
-    },
-    "savings": {
-      "allocationPctToSavings": 0.0,
-      "annualYield": 0.015
-    },
-    "portfolio": {
-      "maxLoans": 7
-    },
-    "market": {
-      "annualAppreciation": 0.03
     }
   },
   "calendar": {
-    "monthlyDays": [31,28,31,30,31,30,31,31,30,31,30,31]
+    "monthlyDays": [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
   },
-  "notes": [
-    "Starting cash reduced to 5,000 (realistic entry).",
-    "Purchase gate requires down + closing + initial rainy funding.",
-    "Debt service and amortization modeled monthly, 30-year fixed.",
-    "Ready for Codex execution with ENGINE_OVERRIDE support."
-  ]
+  "policies": {
+    "purchase": { "allowFeederForClosing": true },
+    "prepay":   { "tieBreak": "lowestLTV_thenLargestBalance" },
+    "freeze":   { "margin": 0.0, "exitConsecutiveMonths": 1 },
+    "portfolio":{ "maxUnits": 7 },
+    "debt":     { "dayCount": "ACT/365" }
+  },
+  "startingBalances": {
+    "HY_Unrestricted": 0.0,
+    "HY_RainyReserve": 0.0,
+    "HY_CapexReserve": 0.0
+  },
+  "banking": {
+    "rainyCoverageMonths": 6
+  },
+  "savings": {
+    "annualYield": 0.04,
+    "prepayPct": 1.0
+  },
+  "lending": {
+    "advanceRate": 0.75,
+    "targetLTV": 0.75,
+    "cashoutCostPct": 0.03,
+    "seasoningMonths": 6
+  },
+  "portfolio": {
+    "maxLoans": 7
+  },
+  "market": {
+    "annualAppreciation": 0.03
+  }
 }
