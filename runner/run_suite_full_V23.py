@@ -223,7 +223,12 @@ def simulate(e, mmax=MAX_MONTHS):
         feeder_draw_net=0.0
         deployable = cash_prefeeder + (accessible if allow_feeder_for_closing else 0.0)
 
-        if freeze_flag==0 and len(units) < (portfolio_top.get("maxLoans",7)) and price_par>0:
+        policy_max = e.get("policies", {}).get("portfolio", {}).get("maxUnits")
+        code_max   = portfolio_top.get("maxLoans", 7)
+        max_units  = policy_max if policy_max is not None else code_max
+
+        if freeze_flag == 0 and len(units) < max_units and price_par > 0:
+
             down_frac = DOWN1 if len(units)==0 else DOWNN
             loan_pf  = price_par*(1 - down_frac)
             rate_m   = RATE/12.0
