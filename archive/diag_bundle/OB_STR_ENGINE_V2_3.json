@@ -1,5 +1,5 @@
 {
-  "version": "2.3-PHOENIX-3BR-FAMILY-2025",
+  "version": "2.3-MVP",
   "constants": {
     "financial": {
       "startingCash": 5000.0,
@@ -7,21 +7,21 @@
       "amortizationYears": 30
     },
     "operations": {
-      "adrBaseline2BR": 425.0,
-      "occupancyBaseline": 0.78,
-      "mgmtPct": 0.20,
-      "capexPct": 0.10,
-      "hoaAnnual": 12800.0,
-      "hoaInflationRate": 0.08,
-      "insuranceRate": 0.033,
+      "adrBaseline2BR": 350.0,
+      "occupancyBaseline": 0.62,
+      "mgmtPct": 0.2,
+      "capexPct": 0.005,
+      "hoaAnnual": 9017.04,
+      "hoaInflationRate": 0.03,
+      "insuranceRate": 0.01,
       "propertyTaxRate": 0.0055,
       "liquidityReserveMultiplier": 1.0
     },
     "acquisition": {
-      "downPaymentFirst": 0.20,
+      "downPaymentFirst": 0.2,
       "downPaymentSubsequent": 0.25,
       "closingCostPct": 0.03,
-      "targetYieldUnlevered": 0.065,
+      "targetYieldUnlevered": 0.075,
       "maxPostRefiLTV": 0.75,
       "refiCooldownYears": 3,
       "dscrThresholdForRefi": 1.20
@@ -35,14 +35,27 @@
     }
   },
   "calendar": {
-    "monthlyDays": [31,28,31,30,31,30,31,31,30,31,30,31]
+    "monthlyDays": [
+      31,
+      28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31
+    ]
   },
   "notes": {
-    "description": "Orange Beach 3/2 splash-pad family niche (Phoenix V–X, Indies, Turquoise) — Nov 2025 baseline with segregated reserves & post-cap feeder prepay"
+    "description": "Orange Beach STR Engine V2.3 – MVP config focused on 2BR unit acquisition and refi/feeder analysis."
   },
   "policies": {
     "portfolio": {
-      "maxUnits": 7
+      "maxUnits": 5
     }
   },
   "startingBalances": {
@@ -72,13 +85,10 @@
     "contributionMonthStart": 1
   },
   "portfolio": {
-    "maxLoans": 7,
-    "postCapBehavior": "feederPrepay"
+    "maxLoans": 5
   },
   "market": {
-    
-    "annualAppreciation": 0.03,
-    "revenueInflationRate": 0.04
+    "annualAppreciation": 0.03
   },
   "lending": {
     "advanceRate": 0.75,
@@ -89,6 +99,11 @@
   "yieldModel": {
     "baseRateMode": "scalar",
     "baseRate": 0.0412,
+    "baseRateByYear": [
+      0.0412,
+      0.0412,
+      0.0412
+    ],
     "strRiskPremium": 0.03,
     "obRiskPremium": 0.0075,
     "illiquidityPremium": 0.005,

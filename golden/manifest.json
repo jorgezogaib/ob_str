@@ -1,8 +1,6 @@
 {
-  "engine_version": "2.3-MVP",
-  "engine_path": "engines/OB_STR_ENGINE_V2_3.json",
-  "rows_captured": {
-    "monthly_first12": 12,
-    "yoy_first3": 3
-  }
+  "runner": "run_suite_full_V23.py",
+  "policy": "YoY: sum flows, snapshot stocks",
+  "count_months": 240,
+  "count_yoy": 3
 }

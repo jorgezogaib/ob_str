@@ -1,310 +1,191 @@
-import io, json
-from copy import deepcopy
+"""
+Streamlit UI for OB_STR engine (V2.3)
+
+Minimal, test-aligned app that:
+
+- Loads the canonical engine JSON from `engines/OB_STR_ENGINE_V2_3.json`
+- Calls `simulate` from `runner.run_suite_full_V23`
+- Builds both monthly and year-over-year DataFrames
+- Renders a simple scenario panel without touching test contracts
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Tuple
 
 import pandas as pd
 import streamlit as st
 
-# Import simulator without triggering __main__
-import runner.run_suite_full_V23 as simmod
+from runner.run_suite_full_V23 import simulate, _build_yoy_rows
 
-st.set_page_config(page_title="OB STR – MVP Runner (V2_3)", layout="wide")
+# ---------------------------------------------------------------------------
+# Paths / constants
+# ---------------------------------------------------------------------------
 
-st.title("OB STR – MVP Runner (V2_3)")
-st.caption("Edit engine constants → Run → Review monthly & YoY → Download results")
+PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_ENGINE_PATH = PROJECT_ROOT / "engines" / "OB_STR_ENGINE_V2_3.json"
 
-# ============ Engine loader ============
 
-col1, col2 = st.columns([1,1], gap="large")
-with col1:
-    src_mode = st.radio(
-        "Engine source",
-        ["Use file path", "Upload JSON"],
-        index=0,
-        horizontal=True,
-    )
-with col2:
-    default_path = "engines/OB_STR_ENGINE_V2_3.json"
-    engine_path = st.text_input("Engine file path", default_path, disabled=(src_mode=="Upload JSON"))
+# ---------------------------------------------------------------------------
+# Engine loading
+# ---------------------------------------------------------------------------
 
-uploaded = None
-engine_obj = None
-load_ok = False
-load_err = None
+def load_engine(path: Path | str) -> dict:
+    """Load an engine JSON file into a dict.
 
-if src_mode == "Upload JSON":
-    uploaded = st.file_uploader("Upload engine JSON", type=["json"])
-    if uploaded:
-        try:
-            engine_obj = json.load(uploaded)
-            load_ok = True
-            st.success("Engine loaded from upload.")
-        except Exception as e:
-            load_err = str(e)
-            st.error(f"Invalid JSON: {e}")
-else:
-    try:
-        engine_obj = simmod.load_eng(simmod.Path(engine_path))
-        load_ok = True
-        st.success(f"Loaded engine from: {engine_path}")
-    except AssertionError as ae:
-        load_err = str(ae)
-        st.error(load_err)
-    except Exception as e:
-        load_err = str(e)
-        st.error(f"Failed to load: {e}")
-
-if not load_ok:
-    st.stop()
-
-# Work on a mutable copy
-e = deepcopy(engine_obj)
-
-# ============ Editable constants UI ============
-st.divider()
-st.subheader("Edit engine constants")
-
-def numeric_editor_dict(section_name: str, d: dict, help_map=None):
+    This is intentionally lightweight – schema validation is handled elsewhere
+    (tests + CLI). The UI assumes it is given a known-good engine.
     """
-    Render number inputs for numeric leaf fields in dict d.
-    Returns updated dict.
+    p = Path(path)
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@st.cache_data(show_spinner=False)
+def _load_engine_cached(path_str: str) -> dict:
+    """Streamlit-cached wrapper around `load_engine`.
+
+    `streamlit`'s cache requires hashable arguments, so we take a string path.
     """
-    if help_map is None:
-        help_map = {}
-    changed = False
-    out = deepcopy(d)
-    for k, v in d.items():
-        key_label = f"{section_name}.{k}"
-        if isinstance(v, (int, float)):
-            # Decide sensible step
-            step = 0.01
-            if abs(v) >= 1000:
-                step = 10.0
-            elif 0 < abs(v) < 1:
-                step = 0.001
-            new_v = st.number_input(
-                key_label,
-                value=float(v),
-                step=step,
-                help=help_map.get(k, None)
-            )
-            if new_v != v:
-                out[k] = float(new_v)
-                changed = True
-        elif isinstance(v, dict):
-            with st.expander(f"{key_label} (nested)", expanded=False):
-                out[k] = numeric_editor_dict(f"{section_name}.{k}", v, help_map=help_map.get(k, {}))
-        else:
-            # Non-numeric leaves are shown but not edited here
-            st.text(f"{key_label}: {v}")
-    return out
+    return load_engine(Path(path_str))
 
-# Known editable sections (present in your engine)
-sections = []
-for name in ["constants","calendar","banking","market","portfolio"]:
-    if name in e:
-        sections.append(name)
 
-colA, colB = st.columns(2, gap="large")
-left, right = colA, colB
+def _get_default_horizon_months(engine: dict) -> int:
+    cal = engine.get("calendar", {})
+    # Fall back to 600 months if the engine ever omits this field.
+    return int(cal.get("horizonMonths", 600))
 
-# Helpers for tooltips if you want (optional)
-HELP = {
-    "constants": {
-        "operations": {
-            "adrBaseline2BR": "Average daily rate assumption.",
-            "occupancyBaseline": "Occupancy (0-1).",
-            "mgmtPct": "Management % of gross.",
-            "capexPct": "CapEx % of gross.",
-            "hoaAnnual": "Annual HOA per unit.",
-            "hoaInflationRate": "Annual HOA inflator."
-        },
-        "acquisition": {
-            "targetYieldUnlevered": "Unlevered target yield used in parity price.",
-            "downPaymentFirst": "Down % on first purchase.",
-            "downPaymentSubsequent": "Down % on later purchases.",
-            "closingCostPct": "Closing costs as % of price."
-        },
-        "debt": {
-            "mortgageRate": "APR (decimal).",
-            "amortizationYears": "Amort term in years."
-        },
-        "financial": {
-            "startingCash": "Initial cash.",
-            "annualSavings": "New cash each year."
-        },
-        "reserves": {
-            "capexMonthsTarget": "Months of capex target held."
-        }
-    },
-    "banking": {
-        "rainyCoverageMonths": "Months of DS+HOA for rainy-day.",
-        "seasoningMonths": "Months before refi/advance allowed.",
-        "advanceRate": "Advance rate on accessible principal.",
-        "cashoutCostPct": "Refi/cash-out friction as %.",
-        "initialBufferMonths": "Extra rainy buffer months at purchase.",
-        "initialCapExBufferMonths": "Capex buffer months at purchase.",
-        "opsCashFloorMonths": "Ops floor = months of (DS+HOA).",
-        "refiLTVTrigger": "LTV threshold to enable accessibility."
-    },
-    "market": {
-        "annualAppreciation": "Annual appreciation used to grow parity price."
-    },
-    "portfolio": {
-        "maxLoans": "Cap for number of concurrent loans."
-    }
-}
 
-# constants sub-sections laid out nicely
-if "constants" in e:
-    st.markdown("### constants")
-    c = e["constants"]
-    subcols = st.columns(2, gap="large")
+# ---------------------------------------------------------------------------
+# Simulation plumbing
+# ---------------------------------------------------------------------------
 
-    with subcols[0]:
-        if "financial" in c:
-            st.markdown("**constants.financial**")
-            c["financial"] = numeric_editor_dict("constants.financial", c["financial"], HELP["constants"].get("financial", {}))
-        if "operations" in c:
-            st.markdown("**constants.operations**")
-            c["operations"] = numeric_editor_dict("constants.operations", c["operations"], HELP["constants"].get("operations", {}))
+def run_model(
+    engine: dict,
+    max_months: int | None = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Run the core engine and return (monthly_df, yoy_df).
 
-    with subcols[1]:
-        if "acquisition" in c:
-            st.markdown("**constants.acquisition**")
-            c["acquisition"] = numeric_editor_dict("constants.acquisition", c["acquisition"], HELP["constants"].get("acquisition", {}))
-        if "debt" in c:
-            st.markdown("**constants.debt**")
-            c["debt"] = numeric_editor_dict("constants.debt", c["debt"], HELP["constants"].get("debt", {}))
-        if "reserves" in c:
-            st.markdown("**constants.reserves**")
-            c["reserves"] = numeric_editor_dict("constants.reserves", c["reserves"], HELP["constants"].get("reserves", {}))
+    This is a thin, UI-oriented wrapper around `simulate` and `_build_yoy_rows`.
+    It does **not** mutate the engine.
+    """
+    mmax = max_months or _get_default_horizon_months(engine)
+    rows = simulate(engine, mmax)
 
-# banking / market / portfolio
-st.markdown("### other sections")
-two = st.columns(2, gap="large")
-with two[0]:
-    if "banking" in e:
-        st.markdown("**banking**")
-        e["banking"] = numeric_editor_dict("banking", e["banking"], HELP.get("banking", {}))
-    if "market" in e:
-        st.markdown("**market**")
-        e["market"] = numeric_editor_dict("market", e["market"], HELP.get("market", {}))
-with two[1]:
-    if "portfolio" in e:
-        st.markdown("**portfolio**")
-        e["portfolio"] = numeric_editor_dict("portfolio", e["portfolio"], HELP.get("portfolio", {}))
+    monthly_df = pd.DataFrame(rows)
+    yoy_rows = _build_yoy_rows(rows)
+    yoy_df = pd.DataFrame(yoy_rows)
 
-st.divider()
+    return monthly_df, yoy_df
 
-# ============ Run controls ============
-st.subheader("Run controls")
-rcol1, rcol2, rcol3 = st.columns([1,1,2])
-with rcol1:
-    max_months = st.number_input("Max months", 1, 600, value=240, step=1)
-with rcol2:
-    # Your simulate currently stops only via mmax; readiness stop handled internally in V2_3.
-    stop_note = st.caption("Readiness stop is enforced inside your simulator when present.")
 
-run_btn = st.button("▶ Run with edited constants", type="primary")
+# ---------------------------------------------------------------------------
+# UI helpers
+# ---------------------------------------------------------------------------
 
-# ============ Run + Show ============
-monthly_df_slot = st.empty()
-yoy_df_slot = st.empty()
-dl_cols = st.columns(2)
+def _render_kpi_row(monthly_df: pd.DataFrame) -> None:
+    """Render a small KPI strip using columns that are guaranteed by tests.
 
-def rollup_yoy(rows):
-    if not rows:
-        return pd.DataFrame()
+    We only touch columns that are enforced in `tests/io/test_csv_schema.py` to
+    avoid coupling the UI to fragile or derived names.
+    """
+    if monthly_df.empty:
+        st.info("No results to display – simulation returned 0 rows.")
+        return
 
-    df = pd.DataFrame(rows)
-    df["_Year"] = df["YYYY-MM"].str.extract(r"Y(\d+)-", expand=False).astype(int)
+    latest = monthly_df.iloc[-1]
 
-    # fields to take the last value of within the year
-    snapshot_fields = ["End Cash", "Loan Balance (End)", "Units Owned"]   # <- include Units Owned
+    col1, col2, col3, col4 = st.columns(4)
 
-    # sum everything numeric except helper + snapshot fields
-    sum_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    for c in ["_Year"] + snapshot_fields:
-        if c in sum_cols:
-            sum_cols.remove(c)
+    # End Cash
+    if "End Cash" in latest:
+        col1.metric("End Cash (last month)", f"{latest['End Cash']:,.0f}")
 
-    agg = df.groupby("_Year")[sum_cols].sum()
-    last_vals = (
-        df.sort_values(["_Year", "YYYY-MM"])
-          .groupby("_Year")[snapshot_fields]
-          .last()
-    )
+    # Units Owned
+    if "Units Owned" in latest:
+        col2.metric("Units Owned", int(latest["Units Owned"]))
 
-    out = pd.concat([agg, last_vals], axis=1).reset_index()
-    out.insert(0, "YYYY-MM", out["_Year"].apply(lambda y: f"Year {y}"))
-    out.insert(1, "UnitID", "TOTAL")
-    out.drop(columns=["_Year"], inplace=True)
+    # Net Income (last 12 months approx) – if available
+    if "Cash From Ops" in monthly_df.columns:
+        trailing = monthly_df["Cash From Ops"].tail(12).sum()
+        col3.metric("Trailing 12m Cash From Ops", f"{trailing:,.0f}")
 
-    # Optional: ensure Units Owned is int
-    if "Units Owned" in out.columns:
-        out["Units Owned"] = out["Units Owned"].astype(int)
+    # DSCR proxy – if we have both NOI and Debt Service style columns
+    if {"Cash From Ops", "Debt Service"}.issubset(monthly_df.columns):
+        ds = monthly_df["Cash From Ops"].tail(12).sum()
+        debt = monthly_df["Debt Service"].tail(12).sum()
+        if debt:
+            col4.metric("Approx DSCR (T12)", f"{ds / debt:0.2f}")
 
-    # Column order (put Units Owned near the front)
-    monthly_cols = list(rows[0].keys())
-    preferred = ["YYYY-MM", "UnitID", "Units Owned"]
-    order = preferred + [c for c in monthly_cols if c not in preferred]
-    out = out.reindex(columns=[c for c in order if c in out.columns])
-    return out
 
-if run_btn:
+def scenario_panel() -> None:
+    """Top-level Streamlit layout for the scenario runner.
+
+    This keeps to a single-page MVP:
+    - Engine selector (today: fixed default engine)
+    - Horizon selector
+    - Run button
+    - KPIs + monthly and YoY tables
+    """
+    st.title("OB_STR Scenario Runner (V2.3)")
+
+    # Load engine once per session
+    with st.sidebar:
+        st.header("Engine / Scenario")
+
+        engine_path = st.text_input(
+            "Engine JSON path",
+            value=str(DEFAULT_ENGINE_PATH),
+            help="Path to a valid engine JSON. Default is the canonical V2.3.",
+        )
+
+        engine = _load_engine_cached(engine_path)
+
+        max_months_default = _get_default_horizon_months(engine)
+        max_months = st.slider(
+            "Horizon (months)",
+            min_value=60,
+            max_value=600,
+            value=max_months_default,
+            step=12,
+            help="Maximum months to simulate.",
+        )
+
+        run_clicked = st.button("Run scenario", type="primary")
+
+    if not run_clicked:
+        st.info("Adjust options in the sidebar and click **Run scenario**.")
+        return
+
     try:
-        # Respect max months
-        simmod.MAX_MONTHS = int(max_months)
-        rows = simmod.simulate(e, mmax=int(max_months))
+        monthly_df, yoy_df = run_model(engine, max_months=max_months)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Simulation failed: {exc}")
+        st.stop()
 
-        if not rows:
-            st.warning("Simulation returned no rows.")
-        else:
-            monthly_df = pd.DataFrame(rows)
-            yoy_df = rollup_yoy(rows)
+    # KPIs
+    _render_kpi_row(monthly_df)
 
-            st.subheader("Monthly timeline")
-            monthly_df_slot.dataframe(monthly_df, use_container_width=True, height=430)
+    st.subheader("Monthly results")
+    st.dataframe(monthly_df, use_container_width=True, height=400)
 
-            st.subheader("Year-over-Year (rolled up)")
-            yoy_df_slot.dataframe(yoy_df, use_container_width=True, height=360)
+    st.subheader("Year-over-year rollup")
+    st.dataframe(yoy_df, use_container_width=True, height=300)
 
-            with dl_cols[0]:
-                buf = io.StringIO()
-                monthly_df.to_csv(buf, index=False)
-                st.download_button("⬇ Download Monthly CSV", buf.getvalue(), "V2_3_Monthly.csv", "text/csv")
 
-            with dl_cols[1]:
-                buf2 = io.StringIO()
-                yoy_df.to_csv(buf2, index=False)
-                st.download_button("⬇ Download YoY CSV", buf2.getvalue(), "V2_3_YearOverYear.csv", "text/csv")
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
-            st.success("Run complete.")
-    except AssertionError as ae:
-        st.error(f"Assertion failed: {ae}")
-    except Exception as ex:
-        st.exception(ex)
+def main() -> None:
+    st.set_page_config(
+        page_title="OB_STR Scenario Runner",
+        layout="wide",
+    )
+    scenario_panel()
 
-st.divider()
-# ============ Save/Download edited engine ============
-st.subheader("Save edited engine")
-save_cols = st.columns(2)
-with save_cols[0]:
-    if st.button("💾 Write to engines/OB_STR_ENGINE_V2_3_EDITED.json"):
-        outp = "engines/OB_STR_ENGINE_V2_3_EDITED.json"
-        try:
-            simmod.Path(outp).write_text(json.dumps(e, indent=2))
-            st.success(f"Wrote: {outp}")
-        except Exception as ex:
-            st.error(f"Write failed: {ex}")
-with save_cols[1]:
-    as_text = json.dumps(e, indent=2)
-    st.download_button("⬇ Download edited engine.json", as_text, file_name="OB_STR_ENGINE_V2_3_EDITED.json", mime="application/json")
 
-# app.py snippet
-import streamlit as st
-from ui.diagnostics_panel import render as render_diagnostics
-
-st.sidebar.header("Panels")
-if st.sidebar.checkbox("Diagnostics", value=True):
-    render_diagnostics(st, "engines/OB_STR_ENGINE_V2_3.json", "runner/V2_3_Monthly.csv")
+if __name__ == "__main__":
+    main()

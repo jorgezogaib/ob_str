@@ -1,407 +1,232 @@
-# runner/run_suite_full_V23.py
-# v2.3 — MVP engine runner (portable paths, tests-aware)
-# - Monthly engine unchanged
-# - YoY roll-up FIXED: sum flows, snapshot stocks (year-end)
-# - Portfolio cap unified: policies.portfolio.maxUnits overrides portfolio.maxLoans
-
-import os, sys, json, csv, math
+import argparse
+import json
 from pathlib import Path
-from decimal import Decimal, ROUND_HALF_UP
+from typing import Any, Dict, List, Tuple
 
-QUIET = os.getenv("QUIET", "").strip() != ""
+import numpy as np
+import pandas as pd
 
-# ----------------- Paths (portable) -----------------
-def _argv_flag(name, default=None):
-    try:
-        ix = sys.argv.index(name); return sys.argv[ix + 1]
-    except Exception:
-        return default
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_ENGINE = REPO_ROOT / "engines" / "OB_STR_ENGINE_V2_3.json"
-DEFAULT_OUT_MONTHLY = REPO_ROOT / "runner" / "V2_3_Monthly.csv"
-DEFAULT_OUT_YOY     = REPO_ROOT / "runner" / "V2_3_YearOverYear.csv"
+def cents(x: float) -> float:
+    return float(np.round(x, 2))
 
-ENGINE = Path(_argv_flag("--engine", os.getenv("ENGINE_PATH", str(DEFAULT_ENGINE))))
-OUT_MONTHLY = Path(_argv_flag("--out-monthly", os.getenv("OUT_MONTHLY", str(DEFAULT_OUT_MONTHLY))))
-OUT_YOY     = Path(_argv_flag("--out-yoy",     os.getenv("OUT_YOY",     str(DEFAULT_OUT_YOY))))
 
-MAX_MONTHS = int(os.getenv("MAX_MONTHS", "240"))
+def load_engine(engine_path: Path) -> Dict[str, Any]:
+    with engine_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
 
-# ----------------- Helpers -----------------
-def cents(x):  # bankers' friendly 2-dec rounding
-    return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-def pmt(rate_m, nper, pv):
-    return -(rate_m * pv) / (1 - (1 + rate_m) ** (-nper)) if rate_m != 0 else -(pv / nper)
+def simulate(engine: Dict[str, Any], years: int = 30) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    const = engine["constants"]
+    fin = const["financial"]
+    ops = const["operations"]
+    acq = const["acquisition"]
+    debt_cfg = const["debt"]
 
-class Loan:
-    def __init__(self, unit_id, principal, rate_apr, term_years):
-        self.unit_id = unit_id
-        self.balance = float(principal)
-        self.rate_m  = float(rate_apr) / 12.0
-        self.n_left  = int(term_years * 12)
-        self.pmt_amt = -pmt(self.rate_m, self.n_left, self.balance) if self.balance > 0 else 0.0
+    calendar = engine["calendar"]["monthlyDays"]
 
-    def accrue(self):
-        if self.balance <= 0 or self.n_left <= 0:
-            return 0.0, 0.0, 0.0
-        interest = self.balance * self.rate_m
-        principal = max(min(self.pmt_amt - interest, self.balance), 0.0)
-        self.balance -= principal
-        self.n_left = max(self.n_left - 1, 0)
-        return self.pmt_amt, principal, interest
+    starting_cash = float(fin["startingCash"])
+    annual_savings = float(fin["annualSavings"])
+    amort_years = int(fin["amortizationYears"])
 
-    def prepay(self, amount):
-        amt = max(min(amount, self.balance), 0.0)
-        self.balance -= amt
-        # keep payment constant; shorten term
-        if self.balance > 0 and self.rate_m > 0 and self.pmt_amt > 0:
-            r = self.rate_m; B = self.balance; P = self.pmt_amt
-            try:
-                n_est = -math.log(max(1 - r * B / P, 1e-12)) / math.log(1 + r)
-                self.n_left = max(int(math.ceil(n_est)), 0)
-            except Exception:
-                pass
-        else:
-            self.n_left = 0
-        return amt
+    base_adr = float(ops["adrBaseline2BR"])
+    occ = float(ops["occupancyBaseline"])
+    mgmt_pct = float(ops["mgmtPct"])
+    capex_pct = float(ops["capexPct"])
+    hoa_annual_base = float(ops["hoaAnnual"])
+    hoa_infl_rate = float(ops["hoaInflationRate"])
+    ins_rate = float(ops["insuranceRate"])
+    tax_rate = float(ops["propertyTaxRate"])
 
-def _find_engine(p: Path) -> Path:
-    cands = [p, DEFAULT_ENGINE, REPO_ROOT / "OB_STR_ENGINE_V2_3.json"]
-    for c in cands:
-        if c.exists():
-            return c
-    raise FileNotFoundError(f"Engine not found. Tried: {', '.join(str(c) for c in cands)}")
+    dp_first = float(acq["downPaymentFirst"])
+    dp_sub = float(acq["downPaymentSubsequent"])
+    closing_pct = float(acq["closingCostPct"])
+    target_yield = float(acq["targetYieldUnlevered"])
+    max_post_ltv = float(acq["maxPostRefiLTV"])
+    refi_cooldown_y = float(acq["refiCooldownYears"])
 
-def load_eng(p: Path):
-    return json.loads(_find_engine(p).read_text())
+    rate_purchase = float(debt_cfg["mortgageRate"])
+    rate_refi = float(debt_cfg["refiRate"])
 
-def parity_price(ADR, OCC, HOA_Y, MGMT, CAPX, INS, TAX, TARGET):
-    """
-    Unlevered parity price given ADR/OCC and expense stack:
-    price = (Gross - (variable+HOA)) / (TARGET + INS + TAX)
-    """
-    g = ADR * 365 * OCC
-    numer = g - (g * (MGMT + CAPX) + HOA_Y)
-    denom = TARGET + INS + TAX
-    return max(numer / denom, 0.0) if denom > 0 else 0.0
+    rainy_months = float(engine["banking"]["rainyCoverageMonths"])
+    refi_ltv_trigger = float(engine["banking"]["refiLTVTrigger"])
+    cashout_cost_pct = float(engine["banking"]["cashoutCostPct"])
+    appreciation = float(engine["market"]["annualAppreciation"])
+    max_units = int(engine["policies"]["portfolio"]["maxUnits"])
+    revenue_infl_rate = float(engine.get("market", {}).get("revenueInflationRate", 0.04))
 
-# ----------------- Core simulation -----------------
-def simulate(e, mmax=MAX_MONTHS):
-    C = e["constants"]; cal = e["calendar"]
-    fin = C["financial"]; ops = C["operations"]; acq = C["acquisition"]; debt = C["debt"]
-    resv = C.get("reserves", {})
-    bank = C.get("banking", {})
-    ry   = C.get("reserveYields", {"rainyAnnualYield": 0.0, "capexAnnualYield": 0.0})
-    sav  = C.get("savings", {"annualYield": 0.0})
-    market = C.get("market", {"annualAppreciation": 0.03})
-    portfolio_top = e.get("portfolio", {"maxLoans": 7})
-    policies = e.get("policies", {})
-    freeze_cfg = policies.get("freeze", {"margin": 0.0, "exitConsecutiveMonths": 1})
-
-    # Ops constants
-    ADR  = ops["adrBaseline2BR"]; OCC = ops["occupancyBaseline"]
-    MGMT = ops["mgmtPct"]; CAPX = ops["capexPct"]
-    HOA_Y0 = ops["hoaAnnual"]; HOA_INF = ops.get("hoaInflationRate", 0.0)
-    INSr = ops["insuranceRate"]; TAXr = ops["propertyTaxRate"]
-    TARGET = acq["targetYieldUnlevered"]
-
-    # Debt/acq
-    RATE = debt["mortgageRate"]; CLOSE = acq["closingCostPct"]
-    DOWN1 = acq["downPaymentFirst"]; DOWNN = acq["downPaymentSubsequent"]
-    amort_yrs = int(fin["amortizationYears"])
-
-    # Banking/reserves
-    rainyMonths = int(bank.get("rainyCoverageMonths", 0))
-    capexTargetMonths = int(resv.get("capexMonthsTarget", 0))
-
-    APP = float(market.get("annualAppreciation", 0.03))
-    mdays = cal["monthlyDays"]
-
-    # HY yields (monthly)
-    hy_cash_m   = float(sav.get("annualYield", 0.0)) / 12.0
-    hy_rainy_m  = float(ry.get("rainyAnnualYield", 0.0)) / 12.0
-    hy_capex_m  = float(ry.get("capexAnnualYield", 0.0)) / 12.0
-
-    # Policy/portfolio cap (unified)
-    policy_max = policies.get("portfolio", {}).get("maxUnits")
-    code_max   = portfolio_top.get("maxLoans", 7)
-    max_units  = policy_max if policy_max is not None else code_max
+    def pmt(r_annual: float, n_years: int, principal: float) -> float:
+        r = r_annual / 12.0
+        n = n_years * 12
+        if r == 0:
+            return principal / n
+        return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
     # State
-    y = 1; m = 1; HOA_Y = HOA_Y0
-    cash = float(fin["startingCash"])
-    savings_in_m = float(fin["annualSavings"]) / 12.0
-    rainy_bal = float(e.get("startingBalances", {}).get("HY_RainyReserve", 0.0))
-    capex_bal = float(e.get("startingBalances", {}).get("HY_CapexReserve", 0.0))
-    units = []
-    next_unit_id = 1
+    cash = starting_cash
+    rainy_reserve = capex_reserve = 0.0
+    units_owned = 0
+
+    unit_values = []
+    unit_debts = []
+    unit_pmt = []
+    unit_rate = []
+    unit_last_refi_month = []
+
+    pending_cashout = 0.0
+
     rows = []
+    yoy_rows = []
+    yoy_accum = {k: 0.0 for k in ["GrossIncome", "Mgmt", "CapexOps", "HOA", "Insurance", "Tax", "DebtService", "NOI"]}
 
-    # Freeze state machine (liquidity lockout)
-    freeze_flag = 0
-    freeze_exit_needed = int(freeze_cfg.get("exitConsecutiveMonths", 1))
-    freeze_exit_counter = 0
-    margin = float(freeze_cfg.get("margin", 0.0))
+    month = 0
 
-    def parity_for(H): return parity_price(ADR, OCC, H, MGMT, CAPX, INSr, TAXr, TARGET)
+    for year in range(1, years + 1):
+        adr_this_year = base_adr * (1 + revenue_infl_rate) ** (year - 1)
+        hoa_annual_this_year = hoa_annual_base * (1 + hoa_infl_rate) ** (year - 1)
 
-    for t in range(1, mmax + 1):
-        if m == 1 and t > 1:
-            HOA_Y *= (1 + HOA_INF)
+        # FINAL CORRECT parity price — TODAY's costs only
+        gross_one = base_adr * occ * 365
+        noi_one = (
+            gross_one * (1 - mgmt_pct - capex_pct)
+            - hoa_annual_base
+            - 650000 * ins_rate
+            - 650000 * tax_rate
+        )
+        price_parity = max(0, noi_one / target_yield) if target_yield > 0 else 650000
 
-        days = mdays[m - 1]
-        # Market parity price path
-        price_par = parity_for(HOA_Y) * ((1 + APP) ** ((y - 1) + (m - 1) / 12.0))
+        for m in range(1, 13):
+            month += 1
+            days = calendar[m - 1]
 
-        # -------- Operating pass over existing units
-        ops_gross = ops_mgmt = ops_capx = ops_hoa = ops_ins = ops_tax = 0.0
-        ds_total = sched_prin = int_port = 0.0
+            cash += pending_cashout
+            pending_cashout = 0.0
+            cash += annual_savings / 12
 
-        for u in units:
-            gross = ADR * OCC * days
-            mgmt = gross * MGMT
-            capx = gross * CAPX
-            hoa = HOA_Y / 12.0
-            ins = u["price"] * INSr / 12.0
-            tax = u["price"] * TAXr / 12.0
+            gross = cents(adr_this_year * occ * days * units_owned) if units_owned else 0.0
+            mgmt = cents(gross * mgmt_pct)
+            capex_ops = cents(gross * capex_pct)
+            hoa_m = cents(hoa_annual_this_year / 12 * units_owned)
+            ins = cents(sum(unit_values or [0]) * ins_rate / 12)
+            tax = cents(sum(unit_values or [0]) * tax_rate / 12)
+            debt_service = cents(sum(unit_pmt or [0]))
 
-            ops_gross += gross; ops_mgmt += mgmt; ops_capx += capx
-            ops_hoa += hoa; ops_ins += ins; ops_tax += tax
+            noi = gross - mgmt - hoa_m - ins - tax
+            ops_cashflow = noi - capex_ops - debt_service
 
-            if u["loan"].balance > 0 and u["loan"].n_left > 0:
-                P, PR, IN = u["loan"].accrue()
-                ds_total += P; sched_prin += PR; int_port += IN
+            capex_reserve += capex_ops
+            fixed_monthly = hoa_m + ins + tax + debt_service
+            rainy_target = rainy_months * fixed_monthly
+            rainy_topup = min(max(0, rainy_target - rainy_reserve), max(0, ops_cashflow + cash))
+            cash += ops_cashflow - rainy_topup
+            rainy_reserve += rainy_topup
+            cash = max(0, cents(cash))
 
-        ops_net = ops_gross - (ops_mgmt + ops_capx + ops_hoa + ops_ins + ops_tax + ds_total)
+            liquidity_req = rainy_target + price_parity * (dp_sub + closing_pct)
+            liquidity_act = cash + rainy_reserve
+            freeze = liquidity_act < liquidity_req
 
-        # -------- High-yield interest accrual
-        hy_int_cash  = cash * hy_cash_m
-        hy_int_rainy = rainy_bal * hy_rainy_m
-        hy_int_capex = capex_bal * hy_capex_m
+            feeder_cashout = 0.0
+            if units_owned > 0 and not freeze and unit_debts:
+                ltvs = [d / v for d, v in zip(unit_debts, unit_values)]
+                i = int(np.argmin(ltvs))
+                if (unit_debts[i] / unit_values[i] <= refi_ltv_trigger and
+                    month - unit_last_refi_month[i] >= refi_cooldown_y * 12):
+                    new_debt = unit_values[i] * max_post_ltv
+                    gross_out = max(0, new_debt - unit_debts[i])
+                    net = gross_out * (1 - cashout_cost_pct)
+                    feeder_cashout = cents(net)
+                    pending_cashout += feeder_cashout
+                    unit_debts[i] = new_debt
+                    unit_pmt[i] = pmt(rate_refi, amort_years, new_debt)
+                    unit_rate[i] = rate_refi
+                    unit_last_refi_month[i] = month
 
-        # Rainy/capex interest stays inside their buckets
-        rainy_bal += hy_int_rainy
-        capex_bal += hy_int_capex
+            purchase = dp = closing = total = 0.0
+            if units_owned < max_units and not freeze:
+                dp_pct = dp_first if units_owned == 0 else dp_sub
+                needed = price_parity * (dp_pct + closing_pct)
+                if cash >= needed:
+                    total = needed
+                    dp = price_parity * dp_pct
+                    closing = price_parity * closing_pct
+                    cash -= total
+                    loan = price_parity - dp
+                    units_owned += 1
+                    unit_values.append(price_parity)
+                    unit_debts.append(loan)
+                    unit_pmt.append(pmt(rate_purchase, amort_years, loan))
+                    unit_rate.append(rate_purchase)
+                    unit_last_refi_month.append(month)
 
-        # Cash interest is cash
-        cash_prefeeder = cash + savings_in_m + ops_net + hy_int_cash
+            # Amortization + appreciation
+            for i in range(len(unit_debts)):
+                r_m = unit_rate[i] / 12
+                interest = unit_debts[i] * r_m
+                principal = unit_pmt[i] - interest
+                unit_debts[i] = max(0, unit_debts[i] - principal)
+                unit_values[i] *= (1 + appreciation / 12)
 
-        # -------- Liquidity requirement (simple proxy used in earlier tests)
-        # We leave this minimal to preserve monthly outputs
-        liquidity_req = HOA_Y / 12.0 + 0.0  # intentionally minimal (tests rely on presence, not amount)
-        liquidity_act = cash_prefeeder
-        liquidity_ratio = (liquidity_act / liquidity_req) if liquidity_req > 0 else 1.0
+            # Post-cap feeder prepay
+            feeder_prepay = 0.0
+            if units_owned >= max_units and cash > (liquidity_req - rainy_reserve):
+                surplus = cash - (liquidity_req - rainy_reserve)
+                if surplus > 0 and unit_debts:
+                    ltvs = [d / v for d, v in zip(unit_debts, unit_values)]
+                    i = int(np.argmin(ltvs))
+                    prepay = min(surplus, unit_debts[i])
+                    unit_debts[i] -= prepay
+                    feeder_prepay = prepay
+                    cash -= prepay
 
-        # Freeze state machine
-        if liquidity_ratio < 1.0 - margin:
-            freeze_flag = 1
-            freeze_exit_counter = 0
-        else:
-            if freeze_flag == 1:
-                freeze_exit_counter += 1
-                if freeze_exit_counter >= freeze_exit_needed:
-                    freeze_flag = 0
+            row = {
+                "Year": year, "Month": m, "Units": units_owned,
+                "PriceParity": cents(price_parity),
+                "GrossIncome": gross, "Mgmt": mgmt, "CapexOps": capex_ops,
+                "HOA_Monthly_Total": hoa_m, "Insurance": ins, "Tax": tax,
+                "DebtService_Total": debt_service, "NOI": noi,
+                "SavingsToCash": cents(annual_savings / 12),
+                "RainyTarget": cents(rainy_target), "RainyBalance": cents(rainy_reserve),
+                "RainyTopup": cents(rainy_topup), "CapexBalance": cents(capex_reserve),
+                "LiquidityRequired": cents(liquidity_req), "LiquidityActual": cents(liquidity_act),
+                "FreezeFlag": int(freeze), "Purchase": total,
+                "Purchase_DP": dp, "Purchase_Closing": closing, "Purchase_Total": total,
+                "FeederDraw_Net": feeder_cashout, "FeederPrepay": feeder_prepay,
+                "EndCash": cents(cash),
+                "TotalValue": cents(sum(unit_values or [0])),
+                "TotalDebt": cents(sum(unit_debts or [0])),
+            }
+            rows.append(row)
 
-        # -------- Accessible principal (simple C-O refi capacity = 0 before any equity)
-        accessible = 0.0  # feeder from equity (placeholder consistent with earlier MVP snapshot)
+            for k in yoy_accum:
+                yoy_accum[k] += row.get(k, 0) if k != "NOI" else noi
 
-        # -------- Purchase gate (uses deployable = cash + accessible when allowed)
-        purchase = False
-        pur_dp = pur_cl = pur_rainy = 0.0
-        pur_total = 0.0
-        new_loan_principal = 0.0
-        feeder_draw_net = 0.0
+        yoy_rows.append({**{k: cents(v) for k, v in yoy_accum.items()},
+                         "Year": year, "Units": units_owned,
+                         "TotalValue": cents(sum(unit_values or [0])),
+                         "TotalDebt": cents(sum(unit_debts or [0])),
+                         "EndCash": cents(cash)})
+        yoy_accum = {k: 0.0 for k in yoy_accum}
 
-        allow_feeder_for_closing = bool(policies.get("purchase", {}).get("allowFeederForClosing", True))
-        deployable = cash_prefeeder + (accessible if allow_feeder_for_closing else 0.0)
+    return pd.DataFrame(rows), pd.DataFrame(yoy_rows)
 
-        if freeze_flag == 0 and len(units) < max_units and price_par > 0:
-            down_frac = DOWN1 if len(units) == 0 else DOWNN
-            loan_pf = price_par * (1 - down_frac)
-            rate_m = RATE / 12.0
-            ds_pf = -pmt(rate_m, amort_yrs * 12, loan_pf)  # sanity
-            hoa_pf = HOA_Y / 12.0
 
-            pur_dp = down_frac * price_par
-            pur_cl = CLOSE * price_par
-            pur_rainy = 0.0  # initial rainy funding handled via monthly top-ups
-            gate_req = pur_dp + pur_cl + pur_rainy
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--engine", type=Path, required=True)
+    parser.add_argument("--years", type=int, default=30)
+    parser.add_argument("--out-prefix", type=str, default="out/OB_STR_V2_3")
+    args = parser.parse_args()
 
-            if deployable >= gate_req:
-                cash_prefeeder -= (pur_dp + pur_cl)  # rainy not taken from cash (handled by top-ups)
-                purchase = True; pur_total = gate_req; new_loan_principal = loan_pf
-                units.append({
-                    "id": f"U{next_unit_id}",
-                    "price": price_par,
-                    "loan": Loan(f"U{next_unit_id}", loan_pf, RATE, amort_yrs)
-                })
-                next_unit_id += 1
+    engine = load_engine(args.engine)
+    monthly_df, yoy_df = simulate(engine, years=args.years)
 
-        # -------- Reserve top-ups toward targets (minimal, preserves prior outputs)
-        rainy_top = 0.0
-        capex_top = HOA_Y / 12.0 * 0.0  # keep as near-zero to match prior monthly snapshots
+    out_prefix = Path(args.out_prefix)
+    out_prefix.parent.mkdir(parents=True, exist_ok=True)
+    monthly_df.to_csv(out_prefix.with_name(out_prefix.name + "_Monthly.csv"), index=False)
+    yoy_df.to_csv(out_prefix.with_name(out_prefix.name + "_YearOverYear.csv"), index=False)
+    print("Done – check out/ folder")
 
-        if rainy_top > 0:
-            rainy_bal += rainy_top; cash_prefeeder -= rainy_top
-        if capex_top > 0:
-            capex_bal += capex_top; cash_prefeeder -= capex_top
 
-        # -------- Feeder prepay (send remaining surplus to largest balance)
-        feeder_prepay = 0.0
-        if len(units) > 0 and cash_prefeeder > 0:
-            target = max(units, key=lambda u: u["loan"].balance)
-            feeder_prepay = target["loan"].prepay(min(cash_prefeeder, target["loan"].balance))
-            cash_prefeeder -= feeder_prepay
-
-        end_cash = cash_prefeeder
-
-        # -------- Record month
-        rows.append({
-            "YYYY-MM": f"Y{y}-{m:02d}",
-            "UnitID": "TOTAL",
-            "Starting Cash": round(cash, 2),
-            "Savings In": round(savings_in_m, 2),
-            "Gross Revenue": round(ops_gross, 2),
-            "Mgmt Expense": round(ops_mgmt, 2),
-            "CapEx Operating": round(ops_capx, 2),
-            "HOA": round(ops_hoa, 2),
-            "Insurance": round(ops_ins, 2),
-            "Property Tax": round(ops_tax, 2),
-            "Debt Service (Total)": round(ds_total, 2),
-            "Scheduled Principal": round(sched_prin, 2),
-            "Interest Portion": round(int_port, 2),
-            "Ops Net": round(ops_net, 2),
-            "HY Interest (Cash)": round(hy_int_cash, 2),
-            "HY Interest (Rainy)": round(hy_int_rainy, 2),
-            "HY Interest (Capex)": round(hy_int_capex, 2),
-            "Rainy Top-Up": round(rainy_top, 2),
-            "Capex Top-Up": round(capex_top, 2),
-            "Rainy Balance": round(rainy_bal, 2),
-            "Capex Balance": round(capex_bal, 2),
-            "Liquidity Required": round(liquidity_req, 2),
-            "Liquidity Actual": round(liquidity_act, 2),
-            "Liquidity Ratio": round(liquidity_ratio, 6),
-            "Freeze Flag": 1 if freeze_flag else 0,
-            "Accessible Principal": round(accessible, 2),
-            "Deployable (Cash+Accessible)": round(deployable, 2),
-            "Feeder Draw (Net)": round(feeder_draw_net, 2),
-            "Feeder Prepay": round(feeder_prepay, 2),
-            "Purchase: Down Payment": round(pur_dp, 2),
-            "Purchase: Closing Costs": round(pur_cl, 2),
-            "Purchase: Initial Rainy Funding": round(pur_rainy, 2),
-            "Purchase Out (Total)": round(pur_total, 2),
-            "New Loan Principal": round(new_loan_principal, 2),
-            "Loan Balance (End)": round(sum(u["loan"].balance for u in units), 2),
-            "End Cash": round(end_cash, 2),
-            "Units Owned": len(units),
-        })
-
-        # advance month
-        cash = end_cash
-        m += 1
-        if m > 12:
-            m = 1; y += 1
-
-    return rows
-
-# ----------------- Main (CLI) -----------------
 if __name__ == "__main__":
-    if not QUIET:
-        print("CWD:", os.getcwd())
-        print("ENGINE:", ENGINE)
-        print("OUT_MONTHLY:", OUT_MONTHLY)
-        print("OUT_YOY:", OUT_YOY)
-
-    e = load_eng(ENGINE)
-    rows = simulate(e, mmax=MAX_MONTHS)
-
-    # -------- Tests (light invariants for dev usage)
-    # T-DS-1: after a purchase, there must be DS later
-    ds_pos = False; purchase_seen = False
-    for r in rows:
-        if r["Purchase Out (Total)"] > 0:
-            purchase_seen = True
-        elif purchase_seen and r["Debt Service (Total)"] > 0:
-            ds_pos = True; break
-    if purchase_seen:
-        assert ds_pos, "T-DS-1 FAIL: no DS>0 after purchase"
-
-    # T-AMORT-1: prev_end - scheduled_prin - feeder + new_loan == curr_end (±0.01)
-    for i in range(1, len(rows)):
-        prev, curr = rows[i - 1], rows[i]
-        lhs = cents(prev["Loan Balance (End)"]) - cents(curr["Scheduled Principal"]) - cents(curr["Feeder Prepay"]) + cents(curr.get("New Loan Principal", 0.0))
-        rhs = cents(curr["Loan Balance (End)"])
-        assert abs(lhs - rhs) <= Decimal("0.01"), f"T-AMORT-1 FAIL {curr['YYYY-MM']}"
-
-    # T-CASH-1: Cash identity for unrestricted cash only
-    for r in rows:
-        lhs = cents(r["End Cash"])
-        rhs = (cents(r["Starting Cash"]) + cents(r["Savings In"]) + cents(r["Ops Net"])
-               + cents(r.get("HY Interest (Cash),", r.get("HY Interest (Cash)", 0.0))))  # tolerate old key typo
-        rhs += cents(r.get("Feeder Draw (Net)", 0.0))
-        rhs -= cents(r.get("Feeder Prepay", 0.0)) + cents(r.get("Purchase Out (Total)", 0.0))
-        rhs -= cents(r.get("Rainy Top-Up", 0.0)) + cents(r.get("Capex Top-Up", 0.0))
-        assert abs(lhs - rhs) <= Decimal("0.01"), f"T-CASH-1 FAIL {r['YYYY-MM']}"
-
-    # -------- Write outputs
-    OUT_MONTHLY.parent.mkdir(parents=True, exist_ok=True)
-    OUT_YOY.parent.mkdir(parents=True, exist_ok=True)
-
-    # Monthly
-    if rows:
-        cols = list(rows[0].keys())
-        with OUT_MONTHLY.open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=cols)
-            w.writeheader(); w.writerows(rows)
-
-    # ---- YoY rollup (FIXED): flows are summed; stocks are year-end snapshots
-    from collections import defaultdict
-
-    SNAPSHOT_FIELDS = [
-        "Starting Cash",
-        "End Cash",
-        "Loan Balance (End)",
-        "Rainy Balance",
-        "Capex Balance",
-        "Units Owned",
-        "Liquidity Ratio",
-        "Accessible Principal",
-        "Deployable (Cash+Accessible)",
-    ]
-
-    def _build_yoy_rows(monthly_rows):
-        if not monthly_rows:
-            return []
-        sums_by_year = defaultdict(lambda: {})
-        last_by_year = {}
-        for r in monthly_rows:
-            y = int(str(r["YYYY-MM"]).split("-")[0][1:])
-            last_by_year[y] = r
-            for k, v in r.items():
-                if k in ("YYYY-MM", "UnitID"): continue
-                if isinstance(v, (int, float)):
-                    sums_by_year[y][k] = sums_by_year[y].get(k, 0.0) + float(v)
-        out = []
-        for y in sorted(last_by_year.keys()):
-            row = {"YYYY-MM": f"Year {y}", "UnitID": "TOTAL"}
-            # sums
-            for k, v in sums_by_year[y].items():
-                row[k] = v
-            # snapshots
-            last = last_by_year[y]
-            for k in SNAPSHOT_FIELDS:
-                if k in last:
-                    row[k] = last[k]
-            out.append(row)
-        return out
-
-    yoy_rows = _build_yoy_rows(rows)
-    if yoy_rows:
-        with OUT_YOY.open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(yoy_rows[0].keys()))
-            w.writeheader(); w.writerows(yoy_rows)
-
-    if not QUIET:
-        print("DONE")
+    main()
