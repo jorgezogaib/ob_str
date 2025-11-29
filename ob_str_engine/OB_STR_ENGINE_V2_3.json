@@ -1,0 +1,55 @@
+{
+  "version": "2.3-PHOENIX-3BR-FAMILY-2025",
+  "constants": {
+    "financial": {
+      "startingCash": 5000.0,
+      "annualSavings": 50000.0,
+      "amortizationYears": 30
+    },
+    "operations": {
+      "adrBaseline2BR": 425.0,
+      "occupancyBaseline": 0.78,
+      "mgmtPct": 0.20,
+      "capexPct": 0.10,
+      "hoaAnnual": 12800.0,
+      "hoaInflationRate": 0.04,
+      "insuranceRate": 0.033,
+      "propertyTaxRate": 0.0055,
+      "liquidityReserveMultiplier": 1.0
+    },
+    "acquisition": {
+      "downPaymentFirst": 0.20,
+      "downPaymentSubsequent": 0.25,
+      "closingCostPct": 0.03,
+      "targetYieldUnlevered": 0.065,
+      "maxPostRefiLTV": 0.75,
+      "refiCooldownYears": 3,
+      "dscrThresholdForRefi": 1.20
+    },
+    "debt": {
+      "mortgageRate": 0.0685,
+      "refiRate": 0.05875
+    },
+    "reserves": {
+      "capexMonthsTarget": 6
+    }
+  },
+  "calendar": {
+    "monthlyDays": [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  },
+  "market": {
+    "annualAppreciation": 0.03,
+    "revenueInflationRate": 0.04
+  },
+  "banking": {
+    "rainyCoverageMonths": 6,
+    "seasoningMonths": 6,
+    "refiLTVTrigger": 0.75,
+    "cashoutCostPct": 0.03
+  },
+  "policies": {
+    "portfolio": {
+      "maxUnits": 7
+    }
+  }
+}

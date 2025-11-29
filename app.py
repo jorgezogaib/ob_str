@@ -18,7 +18,7 @@ from typing import Tuple
 import pandas as pd
 import streamlit as st
 
-from runner.run_suite_full_V23 import simulate, _build_yoy_rows
+from runner.run_suite_full_V23 import simulate
 
 # ---------------------------------------------------------------------------
 # Paths / constants
@@ -66,20 +66,9 @@ def run_model(
     engine: dict,
     max_months: int | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Run the core engine and return (monthly_df, yoy_df).
-
-    This is a thin, UI-oriented wrapper around `simulate` and `_build_yoy_rows`.
-    It does **not** mutate the engine.
-    """
-    mmax = max_months or _get_default_horizon_months(engine)
-    rows = simulate(engine, mmax)
-
-    monthly_df = pd.DataFrame(rows)
-    yoy_rows = _build_yoy_rows(rows)
-    yoy_df = pd.DataFrame(yoy_rows)
-
+    mmax = max_months or 600
+    monthly_df, yoy_df = simulate(engine, years=mmax // 12 + 1)
     return monthly_df, yoy_df
-
 
 # ---------------------------------------------------------------------------
 # UI helpers

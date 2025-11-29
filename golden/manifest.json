@@ -1,6 +1,0 @@
-{
-  "runner": "run_suite_full_V23.py",
-  "policy": "YoY: sum flows, snapshot stocks",
-  "count_months": 240,
-  "count_yoy": 3
-}
