@@ -13,7 +13,11 @@
       "Bash(copy:*)",
       "Bash(streamlit run:*)",
       "Bash(cat:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(tree:*)"
     ]
   }
 }
