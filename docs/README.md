@@ -11,14 +11,16 @@ It is written for developers (including future Grok) who need to understand inte
 
 ## How to Run Forever
 
-``bash
-obrun
-→ Instantly creates:
+```bash
+make obrun
+# or
+python run_quick.py
+```
 
-out/OB_STR_V2_3_Monthly_YYYY-MM-DD.csv
-out/OB_STR_V2_3_YearOverYear_YYYY-MM-DD.csv
-
-(No long commands ever again.)
+Instantly creates:
+- `out/OB_STR_V2_3_Monthly_YYYY-MM-DD.csv`
+- `out/OB_STR_V2_3_YearOverYear_YYYY-MM-DD.csv`
+- `out/reports/*.csv` (investor reports, unit breakdowns)
 
 ## Core Execution Flow (monthly loop in simulator.py)
 
@@ -81,13 +83,34 @@ out/OB_STR_V2_3_YearOverYear_YYYY-MM-DD.csv
 
 ## Canonical Programmatic Entry Point
 
-``python
+```python
 from ob_str_engine.engine.simulator import simulate
 from pathlib import Path
 
 result = simulate(Path("ob_str_engine/OB_STR_ENGINE_V2_3.json"))
-### result.monthly → pandas DataFrame
-### result.yearly  → pandas DataFrame (currently empty)
+# result.monthly → pandas DataFrame (360 rows)
+# result.yearly  → pandas DataFrame (30 rows)
+```
+
+## Compatibility Layer (compat.py)
+
+For backward compatibility with legacy test code and scripts that imported from the old `runner.run_suite_full_V23` module, a compatibility layer exists at `ob_str_engine/compat.py`.
+
+**Purpose:**
+- Provides backward-compatible API wrapping the new `ob_str_engine.engine.simulator` module
+- Allows old imports to continue working without modification
+- Created during Phase 1 fixes (Dec 2025) to unbreak the test suite
+
+**Usage (legacy code):**
+```python
+from ob_str_engine.compat import run_sim_V23  # Old-style import
+# Internally calls ob_str_engine.engine.simulator.simulate()
+```
+
+**Modern code should import directly from the engine:**
+```python
+from ob_str_engine.engine.simulator import simulate  # Preferred
+```
 
 ## File-by-File Responsibility Matrix
 
@@ -102,6 +125,9 @@ result = simulate(Path("ob_str_engine/OB_STR_ENGINE_V2_3.json"))
 | reserves.py                 | Rainy-day top-up logic                             | simulator.py |
 | liquidity.py                | Freeze flag calculation (very sensitive)           | simulator.py |
 | feeder.py                   | Refi cash-out + surplus prepay                     | simulator.py |
+| distributions.py            | Distribution policy, waterfall calculations        | simulator.py, config validation |
+| reports.py                  | Investor reports, unit breakdowns, summaries       | simulator.py output data |
+| compat.py                   | Backward-compatible API wrapper                    | simulator.py (wraps new API) |
 | simulator.py                | Master loop, row recording, state management      | All other modules |
 
 ## Known “Gotchas” That Break Byte-for-Byte Parity
@@ -118,34 +144,44 @@ This document is the service manual.
 Keep it updated only when logic changes, never for cosmetic reasons.
 
 ## Current Clean Repo Contents
-.github/workflows/ci.yml
-.streamlit/config.toml
-Makefile
-README_RUN.txt
-app.py
-current_structure.txt
-ob_str_engine/
-├── init.py
-├── engine/
-│   ├── init.py
-│   ├── acquisition.py
-│   ├── config.py
-│   ├── debt.py
-│   ├── expenses.py
-│   ├── feeder.py
-│   ├── liquidity.py
-│   ├── reserves.py
-│   ├── revenue.py
-│   ├── simulator.py
-│   └── types.py
-├── run_simulation.py          # (optional — can be ignored or fixed later)
-├── OB_STR_ENGINE_V2_3.json     # ← THE CONFIG
-├── init.py                     # (empty, harmless)
-└── init.py
-requirements.txt
-tests/                          # full pytest suite
-ui/                             # Streamlit UI
-out/                            # ← fresh CSVs land here
+```
+gracious-golick/
+├── docs/                       # All documentation
+│   ├── README.md              # This file - technical reference
+│   ├── QUICKSTART.md          # 5-minute getting started guide
+│   ├── PROJECT_STATUS.md      # Current capabilities
+│   └── archive/               # Historical documentation
+├── ob_str_engine/
+│   ├── __init__.py
+│   ├── compat.py              # Compatibility layer for legacy imports
+│   ├── OB_STR_ENGINE_V2_3.json  # ← THE CONFIG
+│   └── engine/
+│       ├── __init__.py
+│       ├── acquisition.py     # Purchase logic, parity price
+│       ├── config.py          # JSON config loading
+│       ├── debt.py            # Amortization, PMT calculations
+│       ├── distributions.py   # Distribution policy & waterfall
+│       ├── expenses.py        # Operating expenses
+│       ├── feeder.py          # Feeder selection & prepayment
+│       ├── liquidity.py       # Liquidity freeze checks
+│       ├── reports.py         # Investor reports generation
+│       ├── reserves.py        # Rainy-day reserve management
+│       ├── revenue.py         # Gross revenue, ADR inflation
+│       ├── simulator.py       # Master monthly loop
+│       └── types.py           # Unit dataclass, SimulationResult
+├── ui/                        # Streamlit dashboard
+│   ├── app.py                 # Main entry point
+│   ├── pages/                 # 6 dashboard pages
+│   ├── components/            # Reusable UI components
+│   └── utils/                 # Simulation runner, scenario manager
+├── tests/                     # Pytest test suite (12 test files)
+├── out/                       # CSV outputs & reports
+├── Makefile                   # Build commands (make obrun, make test)
+├── requirements.txt           # Python dependencies
+├── run_quick.py              # Quick simulation runner
+├── Launch_STR_Dashboard.bat  # Windows UI launcher
+└── README.md                  # Project landing page
+```
 
 
 

@@ -8,12 +8,14 @@
 
 **Run Simulation:**
 ```bash
-obrun
+make obrun
+# or: python run_quick.py
 ```
 
 **Launch Dashboard:**
 ```bash
 Launch_STR_Dashboard.bat
+# or: streamlit run ui/app.py
 ```
 
 **Run Tests:**
@@ -68,7 +70,8 @@ gracious-golick/
 
 | Command | Description |
 |---------|-------------|
-| `obrun` | Run 30-year simulation |
+| `make obrun` | Run 30-year simulation |
+| `python run_quick.py` | Alternative simulation command |
 | `Launch_STR_Dashboard.bat` | Open interactive dashboard |
 | `make test` | Run full test suite |
 | `make clean` | Clean cache and outputs |

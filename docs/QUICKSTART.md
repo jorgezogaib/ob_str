@@ -7,14 +7,21 @@ Get up and running with the STR Investment Model in under 5 minutes.
 ## 1. Run Simulation (Command Line)
 
 ```bash
-obrun
+make obrun
+```
+
+**Alternative commands:**
+```bash
+python run_quick.py       # Direct Python execution
+make run                   # Equivalent to make obrun
 ```
 
 **Output:**
 - `out/OB_STR_V2_3_Monthly_YYYY-MM-DD.csv` - Monthly detail (360 rows)
 - `out/OB_STR_V2_3_YearOverYear_YYYY-MM-DD.csv` - Annual summary (30 rows)
+- `out/reports/*.csv` - Investor reports and unit breakdowns
 
-**Alternative:** Use the Python API:
+**Programmatic API:**
 ```python
 from ob_str_engine.engine.simulator import simulate
 from pathlib import Path
@@ -138,7 +145,7 @@ gracious-golick/
 
 | Task | Command |
 |------|---------|
-| Run simulation | `obrun` |
+| Run simulation | `make obrun` or `python run_quick.py` |
 | Launch dashboard | `Launch_STR_Dashboard.bat` |
 | Run tests | `make test` |
 | Clean cache | `make clean` |

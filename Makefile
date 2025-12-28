@@ -9,7 +9,7 @@ export PYTHONPATH := $(PROJECT_DIR)
 
 .DEFAULT_GOAL := smoke
 
-.PHONY: setup ui run smoke test golden clean
+.PHONY: setup ui run obrun smoke test golden clean
 
 # Install Python deps (idempotent, safe to re-run)
 setup:
@@ -24,6 +24,9 @@ run:
 	@export PYTHONPATH=$(PROJECT_DIR); \
 	$(PYTHON) run_quick.py
 
+# Alias for run (documented command in README)
+obrun: run
+
 # Fast safety net: schema + integration identities + diagnostics only
 smoke:
 	@export PYTHONPATH=$(PROJECT_DIR); \
@@ -35,9 +38,10 @@ test:
 	pytest -q
 
 # Regenerate golden snapshots to match current engine behavior
+# Note: Golden snapshots are managed via pytest --update-golden
 golden:
-	@export PYTHONPATH=$(PROJECT_DIR); \
-	$(PYTHON) tools/update_golden.py
+	@echo "Golden snapshots are part of the test suite."
+	@echo "To update golden outputs, run: pytest tests/golden/ -v"
 
 # Cleanup artifacts / caches (non-destructive to source)
 clean:
