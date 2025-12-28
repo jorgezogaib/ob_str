@@ -17,20 +17,12 @@ setup:
 
 # Launch Streamlit UI
 ui:
-	@if lsof -i :8501 >/dev/null 2>&1; then \
-		echo "Killing stale Streamlit process on port 8501..."; \
-		kill -9 $$(lsof -t -i :8501); \
-	fi
-	@echo "Clearing Codespaces port forwarding..."
-	@gp ports close --port 8501 >/dev/null 2>&1 || true
-	streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+	streamlit run ui/app.py --server.port=8501 --server.address=0.0.0.0
 
-
-# One-off engine run + quick peek at the monthly CSV header
+# One-off engine run (using run_quick.py helper script)
 run:
 	@export PYTHONPATH=$(PROJECT_DIR); \
-	QUIET=1 $(PYTHON) runner/run_suite_full_V23.py && \
-	head -n 5 runner/V2_3_Monthly.csv
+	$(PYTHON) run_quick.py
 
 # Fast safety net: schema + integration identities + diagnostics only
 smoke:
@@ -49,6 +41,7 @@ golden:
 
 # Cleanup artifacts / caches (non-destructive to source)
 clean:
-	@rm -f runner/V2_3_Monthly.csv runner/V2_3_YearOverYear.csv || true
+	@rm -f out/*.csv 2>/dev/null || true
 	@find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find . -name ".pytest_cache" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find . -name "*.pyc" -delete 2>/dev/null || true

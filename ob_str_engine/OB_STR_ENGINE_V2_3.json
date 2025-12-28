@@ -9,8 +9,8 @@
     "operations": {
       "adrBaseline2BR": 425.0,
       "occupancyBaseline": 0.78,
-      "mgmtPct": 0.20,
-      "capexPct": 0.10,
+      "mgmtPct": 0.2,
+      "capexPct": 0.1,
       "hoaAnnual": 12800.0,
       "hoaInflationRate": 0.04,
       "insuranceRate": 0.033,
@@ -18,38 +18,122 @@
       "liquidityReserveMultiplier": 1.0
     },
     "acquisition": {
-      "downPaymentFirst": 0.20,
+      "downPaymentFirst": 0.2,
       "downPaymentSubsequent": 0.25,
       "closingCostPct": 0.03,
       "targetYieldUnlevered": 0.065,
       "maxPostRefiLTV": 0.75,
       "refiCooldownYears": 3,
-      "dscrThresholdForRefi": 1.20
+      "dscrThresholdForRefi": 1.2,
+      "refiCashoutStrategy": "max"
     },
     "debt": {
       "mortgageRate": 0.0685,
       "refiRate": 0.05875
     },
     "reserves": {
-      "capexMonthsTarget": 6
+      "capexMonthsTarget": 6,
+      "enableCapexCeiling": true,
+      "capexCeilingMonths": 6,
+      "enableRainySweep": true,
+      "rainyBufferPct": 1.2
     }
   },
   "calendar": {
-    "monthlyDays": [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    "monthlyDays": [
+      31,
+      28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31
+    ]
   },
   "market": {
     "annualAppreciation": 0.03,
     "revenueInflationRate": 0.04
   },
   "banking": {
-    "rainyCoverageMonths": 6,
+    "rainyCoverageMonths": 5,
+    "operatingCashMonths": 1,
     "seasoningMonths": 6,
     "refiLTVTrigger": 0.75,
-    "cashoutCostPct": 0.03
+    "cashoutCostPct": 0.03,
+    "cashInterestRate": 0.04,
+    "purchaseReserveMonths": 6
   },
   "policies": {
     "portfolio": {
-      "maxUnits": 7
+      "maxUnits": 7,
+      "stopRefiAtMaxUnits": true
+    },
+    "capitalAllocation": {
+      "feederPrepaymentPct": 0.7,
+      "savingsAccumulationPct": 0.3
+    }
+  },
+  "distribution": {
+    "enabled": true,
+    "triggers": {
+      "maxLTV": 0.0
+    },
+    "distribution": {
+      "distributionPct": 1.0
+    }
+  },
+  "validation": {
+    "ltv": {
+      "maxSafeThreshold": 0.85,
+      "maxMonthlyDropWithoutEvent": 0.1
+    },
+    "dscr": {
+      "criticalThreshold": 1.0,
+      "lenderMinimum": 1.25,
+      "maxMonthsBelowLender": 12
+    },
+    "acquisition": {
+      "minLiquidityToFlag": 50000.0,
+      "maxMonthsStuck": 60,
+      "yearToStopCheckingStuck": 25,
+      "maxConsecutiveMonths": 0
+    },
+    "refinance": {
+      "minProceedsToJustifyCosts": 20000.0,
+      "maxRefisPerPropertyLifetime": 3
+    },
+    "reserves": {
+      "minCushionPctAtPurchase": 0.8,
+      "maxReserveHoarding": 500000.0,
+      "maxMonthlyDropPct": 0.5,
+      "sweepToleranceMonths": 12
+    },
+    "cashFlow": {
+      "maxMonthsNegative": 6,
+      "noiVolatilityThreshold": 3000.0,
+      "minCashOnCashReturn": 0.05,
+      "maxCashOnCashReturn": 0.3
+    },
+    "portfolio": {
+      "minPropertiesByYear5": 3,
+      "equityGrowthTolerancePct": 0.7,
+      "minDebtFreeYear": 15,
+      "maxDebtFreeYear": 30,
+      "minUnitsForDebtFreeCheck": 5,
+      "portfolioGrowthTolerancePct": 0.6
+    },
+    "feeder": {
+      "minAnnualLTVDecrease": 0.05,
+      "maxMonthsSameFeeder": 36
+    },
+    "timing": {
+      "maxMonthsAtSamePropertyCount": 24,
+      "minEquityGrowthWhileStuck": 0.2
     }
   }
 }

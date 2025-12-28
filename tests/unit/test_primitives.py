@@ -1,5 +1,5 @@
 import math
-from runner.run_suite_full_V23 import parity_price, pmt
+from ob_str_engine.compat import parity_price, pmt
 
 def test_parity_price_basic():
     adr, occ = 350.0, 0.65

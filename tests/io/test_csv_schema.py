@@ -1,9 +1,9 @@
 import json
 import pandas as pd
 from pathlib import Path
-from runner.run_suite_full_V23 import simulate
+from ob_str_engine.compat import simulate
 
-ENGINE = Path("engines/OB_STR_ENGINE_V2_3.json")
+ENGINE = Path("ob_str_engine/OB_STR_ENGINE_V2_3.json")
 
 EXPECTED = [
  "YYYY-MM","UnitID","Starting Cash","Savings In","Gross Revenue","Mgmt Expense","CapEx Operating","HOA",

@@ -1,10 +1,10 @@
 import json
 import pandas as pd
 from pathlib import Path
-from runner.run_suite_full_V23 import simulate
+from ob_str_engine.compat import simulate
 from ui.diagnostics import first_purchase, next_ready, gate_breakdown
 
-ENGINE = Path("engines/OB_STR_ENGINE_V2_3.json")
+ENGINE = Path("ob_str_engine/OB_STR_ENGINE_V2_3.json")
 
 def test_diagnostics_basic_paths():
     e = json.loads(ENGINE.read_text())

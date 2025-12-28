@@ -1,8 +1,8 @@
 import json, random
 from pathlib import Path
-from runner.run_suite_full_V23 import simulate
+from ob_str_engine.compat import simulate
 
-ENGINE_P = Path("engines/OB_STR_ENGINE_V2_3.json")
+ENGINE_P = Path("ob_str_engine/OB_STR_ENGINE_V2_3.json")
 
 def test_random_edges_hold_identities_quick():
     base = json.loads(ENGINE_P.read_text())

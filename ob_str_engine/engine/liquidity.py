@@ -5,6 +5,7 @@ def liquidity_check(
     engine: dict,
     units_owned: int,
     max_units: int,
+    fixed_monthly_costs: float,
 ) -> tuple[bool, float, float]:
     if units_owned >= max_units:
         return False, 0.0, 0.0
@@ -16,7 +17,7 @@ def liquidity_check(
     rainy_months = float(banking["rainyCoverageMonths"])
 
     next_purchase = price_parity * (dp_pct + closing_pct)
-    rainy_needed = rainy_months * (price_parity * (units_owned + 1) * 0.05 / 12)  # original proxy
+    rainy_needed = rainy_months * fixed_monthly_costs
     required = next_purchase + rainy_needed
     available = cash + rainy_reserve
 

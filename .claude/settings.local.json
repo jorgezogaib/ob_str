@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(git log:*)",
+      "Bash(ls:*)",
+      "Bash(python run_quick.py:*)",
+      "Bash(python:*)",
+      "Bash(copy \"C:\\Users\\jorge\\.claude-worktrees\\ob_str\\gracious-golick\\out\\simulation_results_feeder.csv\" \"C:\\Users\\jorge\\.claude-worktrees\\ob_str\\gracious-golick\\out\\baseline_current.csv\")",
+      "Bash(copy:*)",
+      "Bash(streamlit run:*)",
+      "Bash(cat:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

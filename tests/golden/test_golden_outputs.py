@@ -3,11 +3,11 @@ import json
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 
-from runner.run_suite_full_V23 import simulate, _build_yoy_rows
+from ob_str_engine.compat import simulate, _build_yoy_rows
 
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = REPO / "golden"
-ENGINE = REPO / "engines" / "OB_STR_ENGINE_V2_3.json"
+ENGINE = REPO / "ob_str_engine" / "OB_STR_ENGINE_V2_3.json"
 
 def _cents(x):
     return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
