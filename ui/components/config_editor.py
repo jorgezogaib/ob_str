@@ -46,7 +46,22 @@ def render_config_editor(form_values: Dict[str, Any]) -> Dict[str, Any]:
         </style>
     """, unsafe_allow_html=True)
 
-    tabs = st.tabs(["💰 Financial", "🏠 Operations", "📈 Acquisition & Debt", "🏦 Reserves & Banking", "💸 Distributions", "📊 Market", "✓ Validation"])
+    tabs = st.tabs([
+        "💰 Financial",
+        "🏠 Operations",
+        "📈 Acquisition & Debt",
+        "🏦 Reserves & Banking",
+        "💸 Distributions",
+        "📊 Market",
+        "📅 Seasonality",
+        "🏛️ Tax",
+        "🛡️ Insurance",
+        "⚡ Events",
+        "🔧 CapEx",
+        "💳 Financing",
+        "🚪 Exit Strategy",
+        "✓ Validation"
+    ])
 
     # Tab 1: Financial & Capital Allocation
     with tabs[0]:
@@ -602,8 +617,682 @@ def render_config_editor(form_values: Dict[str, Any]) -> Dict[str, Any]:
                 help="Annual rent/ADR increase rate. STR rates often grow faster than traditional rent."
             )
 
-    # Tab 7: Validation Thresholds
+    # Tab 7: Seasonality / Market Profiles
     with tabs[6]:
+        st.markdown("### Seasonality & Market Profiles")
+        st.caption("Configure monthly ADR and occupancy variations by market")
+
+        # Initialize market_profiles if not present
+        if "market_profiles" not in updated:
+            updated["market_profiles"] = form_values.get("market_profiles", {})
+
+        # Get current market profiles
+        profiles = updated["market_profiles"]
+        profile_names = list(profiles.keys())
+
+        if profile_names:
+            selected_profile = st.selectbox(
+                "Select Market Profile to Edit",
+                options=profile_names,
+                format_func=lambda x: profiles[x].get("display_name", x),
+                help="Choose which market profile to configure"
+            )
+
+            if selected_profile:
+                profile = profiles[selected_profile]
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**Profile Settings**")
+                    profile["display_name"] = st.text_input(
+                        "Display Name",
+                        value=profile.get("display_name", selected_profile),
+                        help="Friendly name for this market"
+                    )
+                    profile["description"] = st.text_input(
+                        "Description",
+                        value=profile.get("description", ""),
+                        help="Brief description of this market"
+                    )
+                    profile["seasonality_enabled"] = st.checkbox(
+                        "Enable Seasonality",
+                        value=profile.get("seasonality_enabled", False),
+                        help="Apply monthly multipliers to ADR and occupancy"
+                    )
+
+                with col2:
+                    st.markdown("**Baseline Values**")
+                    if "baseline" not in profile:
+                        profile["baseline"] = {}
+                    profile["baseline"]["adr"] = st.number_input(
+                        "Baseline ADR ($)",
+                        min_value=50.0,
+                        max_value=1000.0,
+                        value=float(profile.get("baseline", {}).get("adr", 200.0)),
+                        step=25.0,
+                        help="Base average daily rate before seasonal adjustments"
+                    )
+                    profile["baseline"]["occupancy"] = st.slider(
+                        "Baseline Occupancy",
+                        min_value=0.40,
+                        max_value=1.0,
+                        value=float(profile.get("baseline", {}).get("occupancy", 0.70)),
+                        step=0.01,
+                        format="%.2f",
+                        help="Base occupancy rate before seasonal adjustments"
+                    )
+
+                if profile.get("seasonality_enabled", False):
+                    st.markdown("---")
+                    st.markdown("### Monthly Multipliers")
+                    st.caption("Values > 1.0 increase rates, < 1.0 decrease rates")
+
+                    if "seasonality" not in profile:
+                        profile["seasonality"] = {
+                            "adr_multipliers": [1.0] * 12,
+                            "occupancy_multipliers": [1.0] * 12
+                        }
+
+                    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+                    # ADR multipliers
+                    st.markdown("**ADR Multipliers**")
+                    adr_cols = st.columns(12)
+                    adr_mults = profile["seasonality"].get("adr_multipliers", [1.0] * 12)
+                    for i, (month, col) in enumerate(zip(months, adr_cols)):
+                        with col:
+                            adr_mults[i] = st.number_input(
+                                month,
+                                min_value=0.5,
+                                max_value=2.0,
+                                value=float(adr_mults[i]),
+                                step=0.05,
+                                format="%.2f",
+                                key=f"adr_{selected_profile}_{i}"
+                            )
+                    profile["seasonality"]["adr_multipliers"] = adr_mults
+
+                    # Occupancy multipliers
+                    st.markdown("**Occupancy Multipliers**")
+                    occ_cols = st.columns(12)
+                    occ_mults = profile["seasonality"].get("occupancy_multipliers", [1.0] * 12)
+                    for i, (month, col) in enumerate(zip(months, occ_cols)):
+                        with col:
+                            occ_mults[i] = st.number_input(
+                                month,
+                                min_value=0.3,
+                                max_value=1.5,
+                                value=float(occ_mults[i]),
+                                step=0.05,
+                                format="%.2f",
+                                key=f"occ_{selected_profile}_{i}"
+                            )
+                    profile["seasonality"]["occupancy_multipliers"] = occ_mults
+
+                updated["market_profiles"][selected_profile] = profile
+        else:
+            st.warning("No market profiles defined. Add profiles in the JSON config.")
+
+    # Tab 8: Tax / Depreciation
+    with tabs[7]:
+        st.markdown("### Tax & Depreciation Settings")
+        st.caption("Configure tax rates and depreciation for accurate after-tax analysis")
+
+        # Initialize tax dict if not present
+        if "tax" not in updated:
+            updated["tax"] = form_values.get("tax", {})
+
+        tax = updated["tax"]
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Tax Configuration**")
+            tax["enabled"] = st.checkbox(
+                "Enable Tax Calculations",
+                value=tax.get("enabled", True),
+                help="Include tax effects in financial projections"
+            )
+
+            if tax.get("enabled", True):
+                tax["marginal_rate"] = st.slider(
+                    "Marginal Tax Rate",
+                    min_value=0.10,
+                    max_value=0.50,
+                    value=float(tax.get("marginal_rate", 0.32)),
+                    step=0.01,
+                    format="%.2f",
+                    help="Your marginal income tax bracket (federal + state combined)"
+                )
+
+                tax["depreciation_years"] = st.number_input(
+                    "Depreciation Years",
+                    min_value=15.0,
+                    max_value=39.0,
+                    value=float(tax.get("depreciation_years", 27.5)),
+                    step=0.5,
+                    format="%.1f",
+                    help="Depreciation period (27.5 for residential rental, 39 for commercial)"
+                )
+
+        with col2:
+            if tax.get("enabled", True):
+                st.markdown("**Depreciation Basis**")
+                tax["land_percentage"] = st.slider(
+                    "Land Percentage",
+                    min_value=0.05,
+                    max_value=0.40,
+                    value=float(tax.get("land_percentage", 0.15)),
+                    step=0.01,
+                    format="%.2f",
+                    help="Portion of purchase price allocated to land (not depreciable)"
+                )
+
+                # Show calculated example
+                example_price = 500000
+                depreciable_basis = example_price * (1 - tax["land_percentage"])
+                annual_depreciation = depreciable_basis / tax["depreciation_years"]
+                tax_savings = annual_depreciation * tax["marginal_rate"]
+
+                st.info(f"""**Example ($500k property):**
+- Depreciable Basis: ${depreciable_basis:,.0f}
+- Annual Depreciation: ${annual_depreciation:,.0f}
+- Annual Tax Savings: ${tax_savings:,.0f}""")
+
+        updated["tax"] = tax
+
+    # Tab 9: Insurance
+    with tabs[8]:
+        st.markdown("### Insurance Configuration")
+        st.caption("Configure property insurance rates and inflation")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Insurance Rates**")
+            updated["insuranceRate"] = st.slider(
+                "Base Insurance Rate",
+                min_value=0.01,
+                max_value=0.10,
+                value=float(form_values.get("insuranceRate", 0.033)),
+                step=0.001,
+                format="%.3f",
+                help="Annual insurance cost as % of property value"
+            )
+
+            # Get insurance inflation from market_profiles or set default
+            insurance_inflation = 0.03
+            if "market_profiles" in updated:
+                default_market = updated.get("policies", {}).get("portfolio", {}).get("default_market", "orange_beach")
+                if default_market in updated["market_profiles"]:
+                    insurance_inflation = updated["market_profiles"][default_market].get("expenses", {}).get("insurance_inflation_rate", 0.03)
+
+            new_insurance_inflation = st.slider(
+                "Insurance Inflation Rate",
+                min_value=0.01,
+                max_value=0.15,
+                value=float(insurance_inflation),
+                step=0.01,
+                format="%.2f",
+                help="Annual increase in insurance premiums (coastal areas often 5-10%)"
+            )
+
+            # Update in market profiles
+            if "market_profiles" in updated:
+                for profile_name, profile in updated["market_profiles"].items():
+                    if "expenses" not in profile:
+                        profile["expenses"] = {}
+                    profile["expenses"]["insurance_inflation_rate"] = new_insurance_inflation
+
+        with col2:
+            st.markdown("**Coverage Examples**")
+            property_value = 500000
+            annual_premium = property_value * updated["insuranceRate"]
+            monthly_premium = annual_premium / 12
+
+            st.info(f"""**For a $500k property:**
+- Annual Premium: ${annual_premium:,.0f}
+- Monthly Cost: ${monthly_premium:,.0f}
+- Rate: {updated['insuranceRate']:.1%} of value""")
+
+            st.markdown("**Insurance Inflation Impact**")
+            year5_rate = updated["insuranceRate"] * ((1 + new_insurance_inflation) ** 5)
+            year10_rate = updated["insuranceRate"] * ((1 + new_insurance_inflation) ** 10)
+
+            st.info(f"""**Premium Growth (at {new_insurance_inflation:.0%}/yr):**
+- Year 5: ${property_value * year5_rate:,.0f}/yr
+- Year 10: ${property_value * year10_rate:,.0f}/yr""")
+
+    # Tab 10: Events / Stress Testing
+    with tabs[9]:
+        st.markdown("### Events & Stress Testing")
+        st.caption("Configure catastrophic events and stress scenarios")
+
+        # Initialize events dict if not present
+        if "events" not in updated:
+            updated["events"] = form_values.get("events", {"enabled": False, "scenarios": []})
+
+        events = updated["events"]
+
+        events["enabled"] = st.checkbox(
+            "Enable Event Simulation",
+            value=events.get("enabled", False),
+            help="Activate stress testing with catastrophic events"
+        )
+
+        if events.get("enabled", False):
+            st.markdown("---")
+
+            # Get existing scenarios
+            scenarios = events.get("scenarios", [])
+
+            if scenarios:
+                st.markdown("### Configured Events")
+
+                for idx, scenario in enumerate(scenarios):
+                    with st.expander(f"📌 {scenario.get('name', f'Event {idx+1}')} ({scenario.get('type', 'unknown')})", expanded=False):
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            st.markdown("**Event Details**")
+                            scenario["name"] = st.text_input(
+                                "Event Name",
+                                value=scenario.get("name", ""),
+                                key=f"event_name_{idx}"
+                            )
+                            scenario["type"] = st.selectbox(
+                                "Event Type",
+                                options=["catastrophic", "market_downturn", "regulatory", "maintenance"],
+                                index=["catastrophic", "market_downturn", "regulatory", "maintenance"].index(scenario.get("type", "catastrophic")),
+                                key=f"event_type_{idx}"
+                            )
+                            scenario["description"] = st.text_area(
+                                "Description",
+                                value=scenario.get("description", ""),
+                                key=f"event_desc_{idx}"
+                            )
+
+                        with col2:
+                            st.markdown("**Timing & Scope**")
+                            scenario["year"] = st.number_input(
+                                "Year",
+                                min_value=1,
+                                max_value=30,
+                                value=int(scenario.get("year", 3)),
+                                key=f"event_year_{idx}"
+                            )
+                            scenario["month"] = st.number_input(
+                                "Month",
+                                min_value=1,
+                                max_value=12,
+                                value=int(scenario.get("month", 9)),
+                                key=f"event_month_{idx}"
+                            )
+                            scenario["scope"] = st.selectbox(
+                                "Scope",
+                                options=["portfolio", "single_unit", "market"],
+                                index=["portfolio", "single_unit", "market"].index(scenario.get("scope", "portfolio")),
+                                key=f"event_scope_{idx}"
+                            )
+
+                        with col3:
+                            st.markdown("**Impacts**")
+                            if "impacts" not in scenario:
+                                scenario["impacts"] = {}
+                            impacts = scenario["impacts"]
+
+                            impacts["vacancy_months"] = st.number_input(
+                                "Vacancy Months",
+                                min_value=0,
+                                max_value=12,
+                                value=int(impacts.get("vacancy_months", 2)),
+                                key=f"event_vacancy_{idx}"
+                            )
+                            impacts["repair_cost"] = st.number_input(
+                                "Repair Cost ($)",
+                                min_value=0.0,
+                                max_value=500000.0,
+                                value=float(impacts.get("repair_cost", 50000)),
+                                step=5000.0,
+                                key=f"event_repair_{idx}"
+                            )
+                            impacts["adr_reduction_pct"] = st.slider(
+                                "ADR Reduction %",
+                                min_value=0.0,
+                                max_value=0.50,
+                                value=float(impacts.get("adr_reduction_pct", 0.10)),
+                                step=0.05,
+                                key=f"event_adr_{idx}"
+                            )
+                            impacts["recovery_months"] = st.number_input(
+                                "Recovery Months",
+                                min_value=1,
+                                max_value=24,
+                                value=int(impacts.get("recovery_months", 6)),
+                                key=f"event_recovery_{idx}"
+                            )
+
+                        st.markdown("**Insurance Claim**")
+                        if "insurance_claim" not in scenario:
+                            scenario["insurance_claim"] = {}
+                        claim = scenario["insurance_claim"]
+
+                        claim_col1, claim_col2, claim_col3 = st.columns(3)
+                        with claim_col1:
+                            claim["coverage_pct"] = st.slider(
+                                "Coverage %",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=float(claim.get("coverage_pct", 0.90)),
+                                step=0.05,
+                                key=f"claim_coverage_{idx}"
+                            )
+                        with claim_col2:
+                            claim["deductible_pct"] = st.slider(
+                                "Deductible %",
+                                min_value=0.0,
+                                max_value=0.10,
+                                value=float(claim.get("deductible_pct", 0.02)),
+                                step=0.005,
+                                key=f"claim_deductible_{idx}"
+                            )
+                        with claim_col3:
+                            claim["payout_delay_months"] = st.number_input(
+                                "Payout Delay (months)",
+                                min_value=0,
+                                max_value=12,
+                                value=int(claim.get("payout_delay_months", 4)),
+                                key=f"claim_delay_{idx}"
+                            )
+
+                        # Delete button
+                        if st.button(f"🗑️ Delete Event", key=f"delete_event_{idx}"):
+                            scenarios.pop(idx)
+                            st.rerun()
+
+                        scenarios[idx] = scenario
+
+            # Add new event button
+            st.markdown("---")
+            if st.button("➕ Add New Event"):
+                new_event = {
+                    "name": "New Event",
+                    "type": "catastrophic",
+                    "year": 5,
+                    "month": 6,
+                    "scope": "portfolio",
+                    "impacts": {
+                        "vacancy_months": 1,
+                        "repair_cost": 25000,
+                        "adr_reduction_pct": 0.05,
+                        "recovery_months": 3
+                    },
+                    "insurance_claim": {
+                        "coverage_pct": 0.80,
+                        "deductible_pct": 0.02,
+                        "payout_delay_months": 2
+                    },
+                    "description": "Describe the event"
+                }
+                scenarios.append(new_event)
+                st.rerun()
+
+            events["scenarios"] = scenarios
+        else:
+            st.info("ℹ️ Event simulation is disabled. Enable above to configure stress scenarios.")
+
+        updated["events"] = events
+
+    # Tab 11: CapEx Schedule
+    with tabs[10]:
+        st.markdown("### CapEx Schedule")
+        st.caption("Configure per-unit system tracking for major replacements")
+
+        # Initialize capex_schedule if not present
+        if "capex_schedule" not in updated:
+            updated["capex_schedule"] = form_values.get("capex_schedule", {"enabled": False, "systems": {}})
+
+        capex = updated["capex_schedule"]
+
+        capex["enabled"] = st.checkbox(
+            "Enable CapEx Tracking",
+            value=capex.get("enabled", False),
+            help="Track system ages and schedule replacements per unit"
+        )
+
+        if capex.get("enabled", False):
+            st.markdown("---")
+            st.markdown("### System Configuration")
+
+            if "systems" not in capex:
+                capex["systems"] = {}
+
+            systems = capex["systems"]
+
+            # Default systems if none exist
+            default_systems = {
+                "hvac": {"lifespan_years": 15, "replacement_cost": 12000, "description": "HVAC System"},
+                "roof": {"lifespan_years": 25, "replacement_cost": 25000, "description": "Roof"},
+                "appliances": {"lifespan_years": 10, "replacement_cost": 8000, "description": "Kitchen Appliances"},
+                "flooring": {"lifespan_years": 7, "replacement_cost": 10000, "description": "Flooring"},
+                "furniture": {"lifespan_years": 5, "replacement_cost": 15000, "description": "Furniture Package"},
+                "water_heater": {"lifespan_years": 12, "replacement_cost": 1500, "description": "Water Heater"}
+            }
+
+            if not systems:
+                systems = default_systems
+
+            # Display each system
+            for sys_key, sys_data in systems.items():
+                with st.expander(f"🔧 {sys_data.get('description', sys_key)}", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        sys_data["description"] = st.text_input(
+                            "System Name",
+                            value=sys_data.get("description", sys_key),
+                            key=f"capex_desc_{sys_key}"
+                        )
+
+                    with col2:
+                        sys_data["lifespan_years"] = st.number_input(
+                            "Lifespan (years)",
+                            min_value=1,
+                            max_value=50,
+                            value=int(sys_data.get("lifespan_years", 10)),
+                            key=f"capex_lifespan_{sys_key}"
+                        )
+
+                    with col3:
+                        sys_data["replacement_cost"] = st.number_input(
+                            "Replacement Cost ($)",
+                            min_value=500.0,
+                            max_value=100000.0,
+                            value=float(sys_data.get("replacement_cost", 5000)),
+                            step=500.0,
+                            key=f"capex_cost_{sys_key}"
+                        )
+
+                    systems[sys_key] = sys_data
+
+            capex["systems"] = systems
+
+            # Summary
+            st.markdown("---")
+            st.markdown("### 30-Year CapEx Summary")
+            total_per_unit = sum(
+                sys_data.get("replacement_cost", 0) * (30 / max(sys_data.get("lifespan_years", 10), 1))
+                for sys_data in systems.values()
+            )
+            st.info(f"""**Per Unit (30 years):**
+- Total CapEx: ${total_per_unit:,.0f}
+- Annual Average: ${total_per_unit / 30:,.0f}
+- Monthly Average: ${total_per_unit / 360:,.0f}""")
+        else:
+            st.info("ℹ️ CapEx tracking is disabled. Enable above to configure per-unit system tracking.")
+
+        updated["capex_schedule"] = capex
+
+    # Tab 12: Financing Dashboard
+    with tabs[11]:
+        st.markdown("### Financing Dashboard Settings")
+        st.caption("Configure debt analytics and tracking options")
+
+        # Initialize financing_dashboard if not present
+        if "financing_dashboard" not in updated:
+            updated["financing_dashboard"] = form_values.get("financing_dashboard", {"enabled": True})
+
+        financing = updated["financing_dashboard"]
+
+        financing["enabled"] = st.checkbox(
+            "Enable Financing Dashboard",
+            value=financing.get("enabled", True),
+            help="Enable comprehensive debt and financing analytics"
+        )
+
+        if financing.get("enabled", True):
+            st.markdown("---")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Tracking Options**")
+                financing["track_interest_paid"] = st.checkbox(
+                    "Track Interest Paid",
+                    value=financing.get("track_interest_paid", True),
+                    help="Track cumulative interest paid per unit and portfolio-wide"
+                )
+                financing["project_payoff_timeline"] = st.checkbox(
+                    "Project Payoff Timeline",
+                    value=financing.get("project_payoff_timeline", True),
+                    help="Calculate projected loan payoff dates"
+                )
+                financing["analyze_refi_opportunities"] = st.checkbox(
+                    "Analyze Refi Opportunities",
+                    value=financing.get("analyze_refi_opportunities", True),
+                    help="Identify potential refinancing opportunities"
+                )
+
+            with col2:
+                st.markdown("**Debt Strategy Info**")
+                st.info("""**The Financing Dashboard tracks:**
+- Amortization schedules per unit
+- Interest vs principal breakdown
+- Projected payoff dates
+- Refinance opportunity analysis
+- Portfolio-wide debt metrics""")
+
+        updated["financing_dashboard"] = financing
+
+    # Tab 13: Exit Strategy
+    with tabs[12]:
+        st.markdown("### Exit Strategy Settings")
+        st.caption("Configure sale, liquidation, and 1031 exchange parameters")
+
+        # Initialize exit_strategy if not present
+        if "exit_strategy" not in updated:
+            updated["exit_strategy"] = form_values.get("exit_strategy", {"enabled": True})
+
+        exit_strat = updated["exit_strategy"]
+
+        exit_strat["enabled"] = st.checkbox(
+            "Enable Exit Strategy Modeling",
+            value=exit_strat.get("enabled", True),
+            help="Enable sale proceeds and exit analysis calculations"
+        )
+
+        if exit_strat.get("enabled", True):
+            st.markdown("---")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Selling Costs**")
+                exit_strat["selling_cost_pct"] = st.slider(
+                    "Selling Cost %",
+                    min_value=0.03,
+                    max_value=0.10,
+                    value=float(exit_strat.get("selling_cost_pct", 0.06)),
+                    step=0.01,
+                    format="%.2f",
+                    help="Agent commission and selling costs (typically 5-6%)"
+                )
+                exit_strat["closing_cost_pct"] = st.slider(
+                    "Closing Cost %",
+                    min_value=0.01,
+                    max_value=0.05,
+                    value=float(exit_strat.get("closing_cost_pct", 0.02)),
+                    step=0.005,
+                    format="%.3f",
+                    help="Title, escrow, and other closing costs"
+                )
+
+                st.markdown("**Capital Gains**")
+                exit_strat["capital_gains_rate"] = st.slider(
+                    "Capital Gains Rate",
+                    min_value=0.0,
+                    max_value=0.30,
+                    value=float(exit_strat.get("capital_gains_rate", 0.15)),
+                    step=0.01,
+                    format="%.2f",
+                    help="Federal long-term capital gains rate (0%, 15%, or 20%)"
+                )
+                exit_strat["state_tax_rate"] = st.slider(
+                    "State Tax Rate",
+                    min_value=0.0,
+                    max_value=0.15,
+                    value=float(exit_strat.get("state_tax_rate", 0.05)),
+                    step=0.01,
+                    format="%.2f",
+                    help="State capital gains tax rate"
+                )
+
+            with col2:
+                st.markdown("**Depreciation Recapture**")
+                exit_strat["depreciation_recapture_rate"] = st.slider(
+                    "Depreciation Recapture Rate",
+                    min_value=0.20,
+                    max_value=0.30,
+                    value=float(exit_strat.get("depreciation_recapture_rate", 0.25)),
+                    step=0.01,
+                    format="%.2f",
+                    help="Tax rate on recaptured depreciation (typically 25%)"
+                )
+
+                st.markdown("**Holding Period**")
+                exit_strat["min_hold_months_ltcg"] = st.number_input(
+                    "Min Hold for LTCG (months)",
+                    min_value=6,
+                    max_value=24,
+                    value=int(exit_strat.get("min_hold_months_ltcg", 12)),
+                    help="Minimum hold period for long-term capital gains treatment"
+                )
+
+                # Example calculation
+                st.markdown("---")
+                st.markdown("**Example Sale ($600k property)**")
+                example_sale = 600000
+                example_basis = 500000
+                example_depreciation = 50000
+                selling_costs = example_sale * exit_strat["selling_cost_pct"]
+                closing_costs = example_sale * exit_strat["closing_cost_pct"]
+                net_sale = example_sale - selling_costs - closing_costs
+                capital_gain = net_sale - example_basis
+                depreciation_recapture = example_depreciation * exit_strat["depreciation_recapture_rate"]
+                cap_gains_tax = capital_gain * (exit_strat["capital_gains_rate"] + exit_strat["state_tax_rate"])
+                total_tax = depreciation_recapture + cap_gains_tax
+                net_proceeds = net_sale - total_tax
+
+                st.info(f"""- Net Sale: ${net_sale:,.0f}
+- Capital Gain: ${capital_gain:,.0f}
+- Total Tax: ${total_tax:,.0f}
+- Net Proceeds: ${net_proceeds:,.0f}""")
+
+        updated["exit_strategy"] = exit_strat
+
+    # Tab 14: Validation Thresholds
+    with tabs[13]:
         st.markdown("### Model Validation Thresholds")
         st.caption("Configure thresholds for validation checks. Lower values = stricter validation.")
 

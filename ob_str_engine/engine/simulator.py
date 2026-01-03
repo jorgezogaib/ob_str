@@ -22,9 +22,46 @@ from pathlib import Path
 from typing import List, Optional
 from .config import load_engine_config
 from .types import Unit, SimulationResult
-from .revenue import calculate_gross_revenue, get_adr_for_year
+from .revenue import calculate_gross_revenue, get_adr_for_year, calculate_gross_revenue_seasonal
 from .expenses import calculate_expenses
-from .acquisition import calculate_parity_price
+from .acquisition import calculate_parity_price, get_default_market_for_acquisition
+from .seasonality import (
+    is_seasonality_enabled,
+    get_seasonal_factors,
+    get_default_market_name,
+    get_market_baseline,
+)
+from .tax import (
+    is_tax_enabled,
+    get_tax_config,
+    calculate_depreciation_basis,
+    process_monthly_depreciation,
+)
+from .insurance import (
+    is_insurance_enhanced,
+    calculate_unit_insurance,
+    calculate_monthly_insurance,
+)
+from .events import (
+    is_events_enabled,
+    get_scheduled_events,
+    check_event_triggers,
+    process_event,
+    get_active_effects,
+    get_pending_payouts,
+)
+from .capex import (
+    is_capex_schedule_enabled,
+    get_capex_config,
+    initialize_unit_systems,
+    age_systems,
+    process_replacements,
+    calculate_annual_capex_budget,
+)
+from .financing import (
+    is_financing_dashboard_enabled,
+    get_monthly_interest_principal_split,
+)
 from .debt import pmt, amortize_one_month
 from .reserves import update_rainy_day_reserve
 from .liquidity import liquidity_check
@@ -128,6 +165,31 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
     # Distribution configuration
     distribution_cfg = engine.get("distribution", {})
 
+    # Phase 1.1: Seasonality configuration
+    use_seasonality = is_seasonality_enabled(engine)
+    default_market = get_default_market_name(engine)
+
+    # Phase 1.4: Tax/Depreciation configuration
+    use_tax = is_tax_enabled(engine)
+    tax_cfg = get_tax_config(engine)
+    land_percentage = tax_cfg["land_percentage"]
+    marginal_tax_rate = tax_cfg["marginal_rate"]
+
+    # Phase 1.2: Insurance configuration
+    use_enhanced_insurance = is_insurance_enhanced(engine)
+
+    # Phase 1.3: Events configuration
+    use_events = is_events_enabled(engine)
+    scheduled_events = get_scheduled_events(engine) if use_events else []
+    event_results = []  # Track processed events for insurance payouts
+
+    # Phase 1.5: CapEx Schedule configuration
+    use_capex_schedule = is_capex_schedule_enabled(engine)
+    capex_replacements_log = []  # Track all replacements for reporting
+
+    # Phase 1.6: Financing Dashboard configuration
+    use_financing_dashboard = is_financing_dashboard_enabled(engine)
+
     # === State Variables ===
     # Three separate cash accounts
     cash = starting_cash  # Operating cash
@@ -171,7 +233,18 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
             cash += annual_savings / 12
 
             # Collect rental revenue into operating cash
-            gross = calculate_gross_revenue(units_owned, adr_this_year, occ, days)
+            # Phase 1.1: Use seasonal revenue if enabled, otherwise flat (v2.3 behavior)
+            if use_seasonality and units:
+                gross, revenue_details = calculate_gross_revenue_seasonal(
+                    units, engine, year, month_global, days
+                )
+                seasonal_enabled = revenue_details.get("seasonality_enabled", False)
+                seasonal_delta = revenue_details.get("seasonal_delta", 0.0)
+            else:
+                gross = calculate_gross_revenue(units_owned, adr_this_year, occ, days)
+                revenue_details = None
+                seasonal_enabled = False
+                seasonal_delta = 0.0
             cash += gross
 
             total_value = sum(u.value for u in units)
@@ -180,6 +253,31 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                 gross, units_owned, total_value, hoa_annual_this_year,
                 mgmt_pct, capex_pct, ins_rate, tax_rate
             )
+
+            # Phase 1.2: Enhanced insurance calculation
+            enhanced_insurance_total = 0.0
+            if use_enhanced_insurance and units:
+                for u in units:
+                    years_owned = max(1, (month_global - u.purchase_month) // 12 + 1)
+                    has_claim = u.insurance_claim_month > 0
+                    months_since_claim = month_global - u.insurance_claim_month if has_claim else 0
+
+                    premium = calculate_unit_insurance(
+                        property_value=u.value,
+                        years_owned=years_owned,
+                        in_flood_zone=u.in_flood_zone,
+                        has_claim=has_claim,
+                        months_since_claim=months_since_claim,
+                        config=engine,
+                        market_name=getattr(u, 'market_profile', default_market)
+                    )
+                    enhanced_insurance_total += calculate_monthly_insurance(premium)
+
+                # Override the basic insurance calculation
+                exp["insurance"] = round(enhanced_insurance_total, 2)
+                exp["insurance_enhanced"] = True
+            else:
+                exp["insurance_enhanced"] = False
 
             # === EXPENSES (paid from operating cash) ===
             cash -= exp["mgmt"]
@@ -194,8 +292,74 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
             # Calculate NOI for reporting
             noi = gross - exp["mgmt"] - exp["hoa_monthly"] - exp["insurance"] - exp["tax"]
 
+            # Phase 1.3: Event processing
+            event_cost_this_month = 0.0
+            event_payout_this_month = 0.0
+            events_triggered_this_month = []
+
+            if use_events and units:
+                # Check for events to trigger
+                triggered_events = check_event_triggers(scheduled_events, year, m)
+
+                for event in triggered_events:
+                    result = process_event(
+                        event=event,
+                        simulation_month=month_global,
+                        current_year=year,
+                        current_month=m,
+                        units_count=units_owned,
+                        unit_ids=[u.unit_id for u in units],
+                        property_values=[u.value for u in units]
+                    )
+                    event_results.append(result)
+                    event_cost_this_month += result.total_repair_cost
+                    events_triggered_this_month.append(result.event_name)
+
+                    # Mark affected units as having a claim
+                    for affected_id in result.affected_units:
+                        for u in units:
+                            if u.unit_id == affected_id:
+                                u.insurance_claim_month = month_global
+                                break
+
+                # Pay repair costs from operating cash
+                cash -= event_cost_this_month
+
+                # Check for insurance payouts due
+                payouts = get_pending_payouts(event_results, month_global)
+                for payout in payouts:
+                    event_payout_this_month += payout["payout_amount"]
+
+                # Receive insurance payouts
+                cash += event_payout_this_month
+
             # Move capex allocation to capex reserve
             capex_reserve += exp["capex_ops"]
+
+            # Phase 1.5: CapEx Schedule - Age systems and process replacements
+            capex_replacements_this_month = []
+            capex_deferred_this_month = 0.0
+            if use_capex_schedule and units:
+                for unit in units:
+                    if unit.system_ages:
+                        # Age systems by one month
+                        unit.system_ages = age_systems(unit.system_ages, 1)
+
+                        # Process replacements (systems at end-of-life)
+                        updated_ages, capex_reserve, replacements, deferred = process_replacements(
+                            unit_id=unit.unit_id,
+                            system_ages=unit.system_ages,
+                            capex_reserve=capex_reserve,
+                            current_month=month_global,
+                            current_year=year,
+                            config=engine
+                        )
+                        unit.system_ages = updated_ages
+                        capex_replacements_this_month.extend(replacements)
+                        capex_deferred_this_month += deferred
+
+                # Log replacements for tracking
+                capex_replacements_log.extend(capex_replacements_this_month)
 
             # Capex ceiling sweep (if enabled)
             capex_sweep = 0.0
@@ -375,6 +539,16 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                     closing = closing_cost
                     loan = price_parity - down_payment
 
+                    # Phase 1.4: Calculate depreciation basis for new unit
+                    unit_depreciation_basis = calculate_depreciation_basis(
+                        price_parity, land_percentage
+                    ) if use_tax else 0.0
+
+                    # Phase 1.5: Initialize system ages for new unit
+                    unit_system_ages = initialize_unit_systems(
+                        next_unit_id, engine
+                    ) if use_capex_schedule else {}
+
                     units.append(Unit(
                         value=price_parity,
                         debt=loan,
@@ -383,7 +557,18 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                         last_refi_month=month_global,
                         unit_id=next_unit_id,
                         cash_invested=purchase_total,
-                        purchase_month=month_global
+                        purchase_month=month_global,
+                        market_profile=default_market,  # Phase 1.1: Assign market profile
+                        # Phase 1.4: Tax/Depreciation fields
+                        purchase_price=price_parity,
+                        depreciation_basis=unit_depreciation_basis,
+                        accumulated_depreciation=0.0,
+                        # Phase 1.5: CapEx Schedule fields
+                        system_ages=unit_system_ages,
+                        # Phase 1.6: Financing Dashboard fields
+                        original_loan=loan,
+                        interest_paid_to_date=0.0,
+                        principal_paid_to_date=0.0,
                     ))
                     next_unit_id += 1
                     units_owned += 1
@@ -466,8 +651,21 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                 if feeder_index is None:
                     feeder_index = select_feeder(units, month_global, cooldown_months, for_refi=False)
 
-            # === AMORTIZATION + APPRECIATION ===
+            # === AMORTIZATION + APPRECIATION + DEPRECIATION ===
+            total_monthly_depreciation = 0.0
+            total_interest_this_month = 0.0
+            total_principal_this_month = 0.0
             for idx, u in enumerate(units):
+                # Phase 1.6: Track interest/principal split before amortization
+                if use_financing_dashboard and u.debt > 0:
+                    interest_portion, principal_portion = get_monthly_interest_principal_split(
+                        u.debt, u.monthly_payment, u.rate
+                    )
+                    u.interest_paid_to_date += interest_portion
+                    u.principal_paid_to_date += principal_portion
+                    total_interest_this_month += interest_portion
+                    total_principal_this_month += principal_portion
+
                 u.debt = amortize_one_month(u.debt, u.monthly_payment, u.rate)
                 # Check if unit is now paid off
                 if u.debt <= 0:
@@ -476,6 +674,16 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                 # Skip appreciation for unit purchased this month
                 if not (purchased_this_month and idx == len(units) - 1):
                     u.value *= (1 + appreciation / 12)
+
+                # Phase 1.4: Process depreciation for this unit
+                if use_tax and u.depreciation_basis > 0:
+                    monthly_dep, new_accum = process_monthly_depreciation(
+                        u.depreciation_basis,
+                        u.accumulated_depreciation,
+                        engine
+                    )
+                    u.accumulated_depreciation = new_accum
+                    total_monthly_depreciation += monthly_dep
 
             # Get current feeder LTV for output
             current_feeder_ltv = get_feeder_ltv(units, feeder_index)
@@ -559,6 +767,23 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                 "Distribution Safe": 1 if dist_result["safe"] else 0,
                 "Distribution Amount": cents(distribution_amount),
                 "Distribution Reason": dist_result["reason"],
+                # Phase 1.1: Seasonality tracking
+                "Seasonality Enabled": 1 if seasonal_enabled else 0,
+                "Seasonal Revenue Delta": cents(seasonal_delta),
+                # Phase 1.4: Tax/Depreciation tracking
+                "Tax Modeling Enabled": 1 if use_tax else 0,
+                "Monthly Depreciation": cents(total_monthly_depreciation),
+                "Annual Depreciation": cents(total_monthly_depreciation * 12),
+                "Total Accumulated Depreciation": cents(sum(u.accumulated_depreciation for u in units)),
+                "Total Depreciation Basis": cents(sum(u.depreciation_basis for u in units)),
+                # Phase 1.2: Enhanced insurance tracking
+                "Enhanced Insurance Enabled": 1 if use_enhanced_insurance else 0,
+                "Insurance Cost": exp["insurance"],
+                # Phase 1.3: Event tracking
+                "Events Enabled": 1 if use_events else 0,
+                "Event Cost": cents(event_cost_this_month),
+                "Insurance Payout": cents(event_payout_this_month),
+                "Events Triggered": "; ".join(events_triggered_this_month) if events_triggered_this_month else "",
                 # Internal tracking (hidden from standard reports)
                 "_RainyTarget": cents(rainy_months * fixed_monthly),
                 "_RainyTopup": cents(rainy_topup),
@@ -569,6 +794,17 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                 "_FeederIndex": feeder_display,
                 "_FeederLTV": round(current_feeder_ltv, 4),
                 "_RefiPropertyIndex": refi_property_index,
+                # Phase 1.5: CapEx Schedule tracking
+                "_CapexScheduleEnabled": 1 if use_capex_schedule else 0,
+                "_CapexReplacementCount": len(capex_replacements_this_month),
+                "_CapexReplacementCost": cents(sum(r.cost for r in capex_replacements_this_month if r.from_reserve)),
+                "_CapexDeferredMaintenance": cents(capex_deferred_this_month),
+                # Phase 1.6: Financing Dashboard tracking
+                "_FinancingDashboardEnabled": 1 if use_financing_dashboard else 0,
+                "_InterestPaidThisMonth": cents(total_interest_this_month),
+                "_PrincipalPaidThisMonth": cents(total_principal_this_month),
+                "_TotalInterestPaid": cents(sum(u.interest_paid_to_date for u in units)),
+                "_TotalPrincipalPaid": cents(sum(u.principal_paid_to_date for u in units)),
             }
 
             rows.append(row_dict)
@@ -665,6 +901,19 @@ def simulate(engine_path: Path, years: int = 30) -> SimulationResult:
                     "Unit_Cap_Rate": unit_cap_rate,
                     "Unit_DSCR": unit_dscr,
                     "Unit_ROI": unit_roi,
+                    # Phase 1.1: Market profile
+                    "Unit_Market_Profile": getattr(unit, 'market_profile', default_market),
+                    # Phase 1.4: Depreciation tracking
+                    "Unit_Purchase_Price": cents(getattr(unit, 'purchase_price', 0.0)),
+                    "Unit_Depreciation_Basis": cents(getattr(unit, 'depreciation_basis', 0.0)),
+                    "Unit_Accumulated_Depreciation": cents(getattr(unit, 'accumulated_depreciation', 0.0)),
+                    # Phase 1.2: Insurance tracking
+                    "Unit_In_Flood_Zone": 1 if getattr(unit, 'in_flood_zone', False) else 0,
+                    "Unit_Has_Insurance_Claim": 1 if getattr(unit, 'insurance_claim_month', 0) > 0 else 0,
+                    # Phase 1.6: Financing Dashboard tracking
+                    "Unit_Original_Loan": cents(getattr(unit, 'original_loan', 0.0)),
+                    "Unit_Interest_Paid_To_Date": cents(getattr(unit, 'interest_paid_to_date', 0.0)),
+                    "Unit_Principal_Paid_To_Date": cents(getattr(unit, 'principal_paid_to_date', 0.0)),
                 })
 
     monthly_df = pd.DataFrame(rows)
