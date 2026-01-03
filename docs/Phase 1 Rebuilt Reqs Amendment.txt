@@ -1,0 +1,539 @@
+# Phase 1 Requirements - Amendments
+
+ 
+
+**Date:** December 28, 2025
+
+**Based on:** User feedback session
+
+**Apply to:** `PHASE_1_REQUIREMENTS.md`
+
+ 
+
+---
+
+ 
+
+## Amendment Summary
+
+ 
+
+These amendments simplify scope based on user preferences for Phase 1 implementation.
+
+ 
+
+---
+
+ 
+
+## Amendment 1: Tax Modeling - Remove CPA Focus
+
+ 
+
+### Changes to Section 1.4
+
+ 
+
+**REMOVE:**
+
+- FR-1.4.4: CPA Handoff Package (entire requirement)
+
+- All references to "Consult CPA" disclaimers
+
+- CPA package export (ZIP file with multiple CSVs)
+
+- Schedule E formatting
+
+- Prominent disclaimer banners in UI
+
+ 
+
+**KEEP:**
+
+- Depreciation calculation (needed for accurate tax expense)
+
+- Tax liability estimation (for after-tax cash flow modeling)
+
+- Simple CSV export of annual tax summary table
+
+ 
+
+**SIMPLIFY:**
+
+- UI Section "CPA Handoff Package" → "Tax Data Export"
+
+  - Remove ZIP download button
+
+  - Keep simple "Download Tax Summary CSV" button
+
+- Remove README.txt generation
+
+- Remove Schedule E breakdown CSV
+
+ 
+
+**Rationale:** Tax modeling scope is purely for accurate expense modeling in simulation, not for tax filing purposes. CPA handoff features are over-engineered for Phase 1.
+
+ 
+
+**Impact:**
+
+- Reduces 1.4 effort from 4-6 days to 3-4 days
+
+- Simplifies UI requirements
+
+- Tax data still available via simple CSV export if needed
+
+ 
+
+---
+
+ 
+
+## Amendment 2: Exit Strategy - Remove Tax Warnings
+
+ 
+
+### Changes to Section 1.7
+
+ 
+
+**REMOVE:**
+
+- FR-1.7.3: Tax Implications (entire requirement)
+
+- All depreciation recapture warnings
+
+- All capital gains mentions
+
+- Tax warning banners in UI
+
+- "Consult CPA" disclaimers related to sales
+
+ 
+
+**KEEP:**
+
+- Sale proceeds calculation (price - costs - debt)
+
+- Net proceeds to owner
+
+- Exit scenario comparison
+
+ 
+
+**SIMPLIFY:**
+
+- Sale event schema: Remove `tax_warning` section entirely
+
+- UI: Remove tax warning banner from exit strategy page
+
+- Focus purely on cash proceeds calculation
+
+ 
+
+**Rationale:** User will handle via 1031 exchange. Capital gains completely out of scope for this model.
+
+ 
+
+**Impact:**
+
+- Reduces 1.7 effort from 4-6 days to 3-4 days
+
+- Cleaner exit strategy UI
+
+- No integration needed with tax module for warnings
+
+ 
+
+---
+
+ 
+
+## Amendment 3: Event Timeline - Simplify Visualization
+
+ 
+
+### Changes to Section 1.3 UI Requirements
+
+ 
+
+**CHANGE:**
+
+- Event Timeline Visualization section
+
+ 
+
+**FROM:**
+
+```
+
+2. **Event Timeline Visualization**
+
+   - Gantt chart: All events on timeline (30-year span)
+
+   - Color-coded by type (minor=green, moderate=yellow, major=orange, catastrophic=red)
+
+   - Show recovery periods as shaded regions
+
+   - Interactive: Click event to edit
+
+```
+
+ 
+
+**TO:**
+
+```
+
+2. **Event Timeline List**
+
+   - Chronological table: All events sorted by year/month
+
+   - Columns: Year, Month, Event Name, Type, Scope, Repair Cost, Revenue Impact
+
+   - Color-coded rows by type (minor=green, moderate=yellow, major=orange, catastrophic=red)
+
+   - Click row to edit event
+
+   - Show count of events per year as summary row
+
+```
+
+ 
+
+**Rationale:** Gantt charts are overkill for event visualization. Simple list/table is clearer and easier to implement.
+
+ 
+
+**Impact:**
+
+- Simpler UI implementation
+
+- Easier to scan chronologically
+
+- Still shows all necessary information
+
+ 
+
+---
+
+ 
+
+## Amendment 4: Exit Scenario Comparison - Simplify
+
+ 
+
+### Changes to Section 1.7 UI Requirements
+
+ 
+
+**CHANGE:**
+
+- Exit Scenario Comparison section
+
+ 
+
+**FROM:**
+
+```
+
+4. **Exit Scenario Comparison**
+
+   - Side-by-side table:
+
+     - Scenario A: Final net worth, IRR, total distributions
+
+     - Scenario B: Final net worth, IRR, total distributions
+
+     - Scenario C: Final net worth, IRR, total distributions
+
+   - Chart: Net worth over time (line per scenario)
+
+```
+
+ 
+
+**TO:**
+
+```
+
+4. **Exit Scenario Comparison**
+
+   - Simple comparison table
+
+   - Rows: Scenario A, Scenario B, Scenario C
+
+   - Columns: Exit Year, Final Net Worth, Total Sale Proceeds, Total Distributions
+
+   - Optional: Basic line chart showing net worth trend (simple, not fancy)
+
+```
+
+ 
+
+**Rationale:** Keep it simple. Focus on key numbers, minimal visualization complexity.
+
+ 
+
+**Impact:**
+
+- Faster UI implementation
+
+- Clearer comparison (table format easier to scan than complex charts)
+
+ 
+
+---
+
+ 
+
+## Amendment 5: Implementation Order Flexibility
+
+ 
+
+### Changes to Implementation Order Recommendation
+
+ 
+
+**CHANGE:**
+
+- Remove prescriptive implementation order
+
+- Add flexibility note
+
+ 
+
+**FROM:**
+
+```
+
+**Recommended Implementation Order:**
+
+1. **Phase 1A** (parallel): 1.1 Seasonality, 1.4 Tax (independent)
+
+2. **Phase 1A** (after 1.1): 1.2 Insurance (depends on market profiles)
+
+...
+
+```
+
+ 
+
+**TO:**
+
+```
+
+**Implementation Order:**
+
+Implement in whatever order is easiest for the developer, respecting these dependencies:
+
+- 1.2 Insurance requires 1.1 Seasonality (market profiles)
+
+- 1.3 Events requires 1.1 Seasonality + 1.2 Insurance
+
+- 1.5 CapEx requires 1.3 Events (for replacement triggers)
+
+- 1.7 Exit requires 1.3 Events (sale events)
+
+ 
+
+Suggested (but flexible): 1.1 → 1.2 → 1.3 → (1.4, 1.5, 1.6, 1.7 in any order)
+
+```
+
+ 
+
+**Rationale:** Developer should optimize for efficiency, not follow rigid order. Dependencies are clear, rest is flexible.
+
+ 
+
+---
+
+ 
+
+## Updated Effort Estimates
+
+ 
+
+| Item | Feature | OLD Estimate | NEW Estimate | Change |
+
+|------|---------|--------------|--------------|--------|
+
+| 1.1 | Seasonality | 8-12 days | 8-12 days | No change |
+
+| 1.2 | Insurance | 5-7 days | 5-7 days | No change |
+
+| 1.3 | Events | 10-14 days | 9-13 days | -1 day (simpler UI) |
+
+| 1.4 | Tax | 4-6 days | 3-4 days | -1 to -2 days (no CPA package) |
+
+| 1.5 | CapEx | 5-7 days | 5-7 days | No change |
+
+| 1.6 | Financing | 2-4 days | 2-4 days | No change |
+
+| 1.7 | Exit | 4-6 days | 3-4 days | -1 to -2 days (no tax warnings) |
+
+ 
+
+**New Total:** 35-51 days (was 38-56 days)
+
+**Savings:** 3-5 days
+
+ 
+
+---
+
+ 
+
+## Updated Acceptance Criteria
+
+ 
+
+### Section 1.4 Tax Modeling
+
+ 
+
+**REMOVE:**
+
+- AC-1.4.4: CPA handoff package exports cleanly
+
+ 
+
+**KEEP:**
+
+- AC-1.4.1: Depreciation schedule generated correctly
+
+- AC-1.4.2: Tax liability estimated
+
+- AC-1.4.3: After-tax cash flow displayed
+
+- AC-1.4.5: Backward compatible
+
+ 
+
+### Section 1.7 Exit Strategy
+
+ 
+
+**REMOVE:**
+
+- AC-1.7.3: Tax warning displayed
+
+ 
+
+**KEEP:**
+
+- AC-1.7.1: Unit sale event processes correctly
+
+- AC-1.7.2: Portfolio sale event processes correctly
+
+- AC-1.7.4: Proceeds allocation works
+
+- AC-1.7.5: Exit scenario comparison functional
+
+ 
+
+---
+
+ 
+
+## Summary of Changes
+
+ 
+
+### Scope Reductions:
+
+1. ❌ CPA handoff package (ZIP with multiple CSVs, Schedule E format, detailed exports)
+
+2. ❌ Tax disclaimers and prominent warnings throughout UI
+
+3. ❌ Capital gains warnings and depreciation recapture mentions
+
+4. ❌ Gantt charts for event timeline
+
+5. ❌ Complex exit scenario visualizations
+
+ 
+
+### What Remains (Sufficient for Phase 1):
+
+1. ✅ Depreciation calculation for accurate tax expense modeling
+
+2. ✅ Tax liability estimates for after-tax cash flow
+
+3. ✅ Simple CSV exports where useful
+
+4. ✅ Clean event list with color-coding
+
+5. ✅ Simple exit scenario comparison table
+
+6. ✅ All core financial modeling logic
+
+ 
+
+### Benefits:
+
+- **Faster implementation** (3-5 days saved)
+
+- **Simpler UI** (easier to maintain)
+
+- **Focused scope** (model accuracy, not tax filing or fancy charts)
+
+- **Still complete** (all strategic decisions supported)
+
+ 
+
+---
+
+ 
+
+## Instructions for Implementation
+
+ 
+
+When implementing Phase 1:
+
+ 
+
+1. **Read main requirements** (`PHASE_1_REQUIREMENTS.md`)
+
+2. **Apply these amendments** (this document)
+
+3. **Simplify where indicated** (remove CPA focus, simplify visualizations)
+
+4. **Keep core logic intact** (all calculations still needed)
+
+ 
+
+If contradiction between main requirements and amendments, **amendments win**.
+
+ 
+
+---
+
+ 
+
+## Changelog
+
+ 
+
+**2025-12-28:** Initial amendments based on user feedback
+
+- Simplified tax modeling scope (removed CPA handoff)
+
+- Removed capital gains warnings from exit strategy
+
+- Simplified event timeline (list vs Gantt)
+
+- Simplified exit scenario comparison
+
+- Made implementation order flexible
+
+ 
+
+---
+
+ 
+
+**These amendments are now the authoritative guidance for Phase 1 implementation.**

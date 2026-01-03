@@ -1,0 +1,9317 @@
+# STR Investment Platform - Phase 1 Requirements
+
+ 
+
+**Created:** December 28, 2025
+
+**Version:** 1.0
+
+**Target Version:** v2.4-PHASE-1
+
+**Current Baseline:** v2.3-PHOENIX-3BR-FAMILY-2025
+
+ 
+
+---
+
+ 
+
+## Executive Summary
+
+ 
+
+This document specifies detailed requirements for Phase 1 of the STR Investment Platform evolution. Phase 1 transforms the simulation engine from a theoretical model into a decision-ready tool by adding:
+
+ 
+
+1. **Revenue accuracy** through seasonality modeling
+
+2. **Expense realism** through coastal insurance dynamics
+
+3. **Risk understanding** through event modeling
+
+4. **Tax planning** through depreciation schedules
+
+5. **Maintenance planning** through CapEx tracking
+
+6. **Debt visibility** through enhanced financing dashboards
+
+7. **Exit planning** through liquidation scenarios
+
+ 
+
+**Timeline Context:** ~4 years before first purchase. Build comprehensively for confident decision-making.
+
+ 
+
+**Handoff Note for Implementation:** This requirements document is structured for implementation by a new Claude session. Each section includes:
+
+- Complete functional specifications
+
+- Exact data model changes with field names/types
+
+- Integration points with line number references to existing code
+
+- Future-proofing guidance to minimize Phase 2+ rework
+
+- Test scenarios with expected outcomes
+
+ 
+
+---
+
+ 
+
+## Requirements Summary Table
+
+ 
+
+| Item | Feature | Complexity | Dependencies | Estimated Effort | Priority |
+
+|------|---------|------------|--------------|------------------|----------|
+
+| **1.1** | Seasonality Engine & Market Profiles | **L** | None | 8-12 days | P0 (Highest) |
+
+| **1.2** | Insurance Modeling | **M** | 1.1 (market profiles), 1.3 (events) | 5-7 days | P0 (Highest) |
+
+| **1.3** | Event Modeling | **L** | 1.1 (seasonality), 1.2 (insurance) | 10-14 days | P0 (Highest) |
+
+| **1.4** | Tax Modeling | **M** | None | 4-6 days | P1 (High) |
+
+| **1.5** | CapEx Schedule | **M** | 1.3 (events) | 5-7 days | P1 (High) |
+
+| **1.6** | Enhanced Financing Dashboard | **S** | None | 2-4 days | P2 (Medium) |
+
+| **1.7** | Exit Strategy Modeling | **M** | 1.3 (events), 1.4 (tax for warnings) | 4-6 days | P2 (Medium) |
+
+ 
+
+**Total Estimated Effort:** 38-56 days
+
+ 
+
+**Recommended Implementation Order:**
+
+1. **Phase 1A** (parallel): 1.1 Seasonality, 1.4 Tax (independent)
+
+2. **Phase 1A** (after 1.1): 1.2 Insurance (depends on market profiles)
+
+3. **Phase 1B** (after 1.1, 1.2): 1.3 Events (integrates seasonality + insurance)
+
+4. **Phase 1B** (parallel with 1.3): 1.5 CapEx (can start after events schema defined)
+
+5. **Phase 1C** (any time): 1.6 Financing Dashboard (UI-only, independent)
+
+6. **Phase 1C** (after 1.3, 1.4): 1.7 Exit Strategy (needs event framework + tax warnings)
+
+ 
+
+---
+
+ 
+
+## Cross-Cutting Concerns
+
+ 
+
+### Backward Compatibility Strategy
+
+ 
+
+**Critical:** All Phase 1 features must be **backward compatible** with existing v2.3 configurations.
+
+ 
+
+**Implementation Pattern:**
+
+```python
+
+# Good: Graceful degradation
+
+market_profile = config.get("market_profiles", {}).get("orange_beach", None)
+
+if market_profile and market_profile.get("seasonality_enabled", False):
+
+    # Use seasonal multipliers
+
+    adr_multiplier = get_seasonal_multiplier(month, market_profile)
+
+else:
+
+    # Fall back to v2.3 behavior (flat rates)
+
+    adr_multiplier = 1.0
+
+```
+
+ 
+
+**Config Validation:**
+
+- Existing v2.3 configs must run without modification
+
+- New features opt-in via explicit config flags (e.g., `"seasonality_enabled": true`)
+
+- Validation framework (ob_str_engine/validation/checks.py) must warn on missing new fields but not error
+
+ 
+
+### Future-Proofing Principles
+
+ 
+
+1. **Market Profiles** (1.1): Design for multiple markets (OB, lake, generic) even though Phase 1 only implements OB
+
+2. **Event System** (1.3): Schema supports both scheduled and probabilistic events (Phase 2 Monte Carlo)
+
+3. **CapEx Tracking** (1.5): Track per-unit balances even though Phase 1 uses shared reserve
+
+4. **Per-Unit Data** (All): Extend `units` DataFrame, not just portfolio-level metrics
+
+5. **Tax Modeling** (1.4): Design for multi-state even though Phase 1 is single-state
+
+ 
+
+### Data Model Philosophy
+
+ 
+
+**Guiding Principle:** Extend, don't replace.
+
+ 
+
+- New config sections go in dedicated namespaces (e.g., `market_profiles`, `events`, `tax`)
+
+- Existing sections remain unchanged for compatibility
+
+- New output columns added to DataFrames (never remove existing columns)
+
+- Versioning: Add `"config_version": "2.4"` field to track schema evolution
+
+ 
+
+### Validation Framework Extension
+
+ 
+
+**Current:** 21 validation checks in `ob_str_engine/validation/checks.py`
+
+ 
+
+**Phase 1 Additions:** Each feature adds 2-5 new checks (estimated +20 total)
+
+ 
+
+**Categories:**
+
+1. **Config validation** - Ensure new fields are well-formed
+
+2. **Logic validation** - Verify calculations work correctly
+
+3. **Output validation** - Confirm results are reasonable
+
+4. **Compatibility validation** - Warn on deprecated patterns
+
+ 
+
+**Example New Check (1.1 Seasonality):**
+
+```python
+
+def validate_seasonality_multipliers(config: dict) -> ValidationResult:
+
+    """Verify monthly multipliers are reasonable (0.5-2.0 range)"""
+
+    # Implementation details in 1.1 spec
+
+```
+
+ 
+
+---
+
+ 
+
+## 1.1 Seasonality Engine & Market Profiles
+
+ 
+
+**Goal:** Model market-specific seasonal revenue patterns accurately, replacing flat 78% occupancy assumption with realistic monthly curves.
+
+ 
+
+**Complexity:** Large (L) - 8-12 days
+
+**Dependencies:** None
+
+**Priority:** P0 (Highest - foundation for revenue accuracy)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.1.1: Market Profile System
+
+**User Story:** As a portfolio planner, I need to define market-specific operating parameters so that multi-market portfolios can be accurately modeled.
+
+ 
+
+**System shall:**
+
+- Support multiple named market profiles (e.g., "orange_beach", "lake_generic", "custom_market_1")
+
+- Each market profile SHALL define:
+
+  - Base ADR and occupancy assumptions
+
+  - Monthly seasonality multipliers (12 values for ADR, 12 for occupancy)
+
+  - Market-specific expense patterns (insurance rates, property tax rates)
+
+  - Appreciation and inflation rates (overrides to global if specified)
+
+  - Human-readable display name and description
+
+- Provide a default "orange_beach" profile pre-configured with Jorge's assumptions
+
+- Provide a fallback "generic" profile (flat seasonality, national averages)
+
+ 
+
+#### FR-1.1.2: Seasonal Revenue Calculation
+
+**User Story:** As a simulation user, I need monthly revenue to reflect seasonal patterns so that cash flow projections are realistic.
+
+ 
+
+**System shall:**
+
+- Apply monthly multipliers to base ADR and occupancy for each unit
+
+- Calculate gross monthly revenue as: `ADR × ADR_multiplier × Occupancy × Occ_multiplier × Days × Units`
+
+- Handle partial months correctly (e.g., property purchased mid-month)
+
+- When property purchased mid-year, apply seasonality from the purchase month forward (Option A from questions)
+
+- Aggregate portfolio-level revenue across units in different markets
+
+ 
+
+#### FR-1.1.3: Parity Pricing Integration
+
+**User Story:** As an acquisition planner, I need parity price to use seasonal revenue averages so that properties are priced for consistent yield.
+
+ 
+
+**System shall:**
+
+- Calculate annual average revenue using seasonal multipliers: `sum(monthly_revenues) / 12`
+
+- Use seasonal average (not flat baseline) in parity price formula in `acquisition.py:calculate_parity_price()`
+
+- Maintain 6.5% unlevered yield target using seasonal NOI
+
+- Document the seasonal adjustment in output columns
+
+ 
+
+#### FR-1.1.4: Unit-to-Market Assignment
+
+**User Story:** As a portfolio manager, I need to assign each property to a market profile so that multi-market portfolios are supported.
+
+ 
+
+**System shall:**
+
+- Each unit assigned to exactly one market profile by name (string reference)
+
+- Assignment happens at acquisition time (stored in Unit dataclass)
+
+- Support portfolio-wide default market (applies to all units unless overridden)
+
+- Validate that referenced market profile exists in config
+
+ 
+
+#### FR-1.1.5: Seasonality Toggle
+
+**User Story:** As an analyst, I need to compare seasonal vs flat projections so that I can quantify the impact of seasonality.
+
+ 
+
+**System shall:**
+
+- Provide `"seasonality_enabled": true/false` flag per market profile
+
+- When false, multipliers default to 1.0 (flat revenue, v2.3 behavior)
+
+- Allow scenario comparison: same config with seasonality on vs off
+
+- Log warning if seasonality disabled in a market with defined curves
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+#### Config JSON Schema Extensions
+
+ 
+
+**New top-level section: `market_profiles`**
+
+ 
+
+```json
+
+{
+
+  "market_profiles": {
+
+    "orange_beach": {
+
+      "display_name": "Orange Beach, AL",
+
+      "description": "Gulf Coast 2BR condo STR market",
+
+      "seasonality_enabled": true,
+
+ 
+
+      "baseline": {
+
+        "adr": 425.0,
+
+        "occupancy": 0.78,
+
+        "notes": "Annual averages - actual monthly varies per curves below"
+
+      },
+
+ 
+
+      "seasonality": {
+
+        "adr_multipliers": [0.85, 0.85, 1.10, 1.10, 1.10, 1.35, 1.35, 1.35, 1.10, 1.10, 0.85, 0.85],
+
+        "occupancy_multipliers": [0.58, 0.58, 0.90, 0.90, 0.90, 1.15, 1.15, 1.15, 0.90, 0.90, 0.58, 0.58],
+
+        "notes": "Index 0 = January, 11 = December. Peak Jun-Aug, Shoulder Mar-May/Sep-Oct, Off-season Nov-Feb"
+
+      },
+
+ 
+
+      "expenses": {
+
+        "insurance_rate": 0.04,
+
+        "property_tax_rate": 0.0055,
+
+        "hoa_annual": 12800.0,
+
+        "notes": "Coastal insurance higher than generic; HOA typical for OB condos"
+
+      },
+
+ 
+
+      "market": {
+
+        "appreciation_rate": 0.03,
+
+        "revenue_inflation_rate": 0.04,
+
+        "notes": "Overrides global market settings if specified"
+
+      }
+
+    },
+
+ 
+
+    "generic": {
+
+      "display_name": "Generic Market (Flat Seasonality)",
+
+      "description": "Default market with no seasonal variation",
+
+      "seasonality_enabled": false,
+
+ 
+
+      "baseline": {
+
+        "adr": 200.0,
+
+        "occupancy": 0.70
+
+      },
+
+ 
+
+      "seasonality": {
+
+        "adr_multipliers": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+
+        "occupancy_multipliers": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+      },
+
+ 
+
+      "expenses": {
+
+        "insurance_rate": 0.033,
+
+        "property_tax_rate": 0.0055,
+
+        "hoa_annual": 8000.0
+
+      },
+
+ 
+
+      "market": {
+
+        "appreciation_rate": 0.03,
+
+        "revenue_inflation_rate": 0.04
+
+      }
+
+    }
+
+  },
+
+ 
+
+  "policies": {
+
+    "portfolio": {
+
+      "maxUnits": 7,
+
+      "stopRefiAtMaxUnits": true,
+
+      "default_market": "orange_beach"  // NEW: Portfolio-wide default
+
+    }
+
+  }
+
+}
+
+```
+
+ 
+
+**Derivation of Orange Beach Multipliers:**
+
+ 
+
+Based on provided assumptions:
+
+- Peak (Jun-Aug): Occupancy 90%, ADR +35%
+
+- Shoulder (Mar-May, Sep-Oct): Occupancy 70%, ADR +10%
+
+- Off-season (Nov-Feb): Occupancy 45%, ADR -15%
+
+ 
+
+**ADR Multipliers** (baseline $425):
+
+- Off-season: -15% → 0.85
+
+- Shoulder: +10% → 1.10
+
+- Peak: +35% → 1.35
+
+ 
+
+**Occupancy Multipliers** (baseline 78%):
+
+- Off-season: 45% / 78% = 0.58
+
+- Shoulder: 70% / 78% = 0.90
+
+- Peak: 90% / 78% = 1.15
+
+ 
+
+**Verification:** Annual average should remain ~78%:
+
+```
+
+(0.58×4 + 0.90×5 + 1.15×3) / 12 = (2.32 + 4.50 + 3.45) / 12 = 10.27 / 12 ≈ 0.856
+
+Actual occupancy: 78% × 0.856 ≈ 67% (lower than flat 78% - more realistic!)
+
+```
+
+ 
+
+**Important:** The provided assumptions yield an annual average occupancy of ~67%, not 78%. This is expected and more realistic. The baseline 78% should be interpreted as "peak season equivalent" not "annual average." Recommend updating `occupancyBaseline` in config to reflect true annual average once seasonality enabled.
+
+ 
+
+#### Unit Dataclass Extension (ob_str_engine/engine/types.py)
+
+ 
+
+```python
+
+@dataclass
+
+class Unit:
+
+    value: float
+
+    debt: float
+
+    monthly_payment: float
+
+    rate: float
+
+    last_refi_month: int
+
+    unit_id: int = 0
+
+    cash_invested: float = 0.0
+
+    purchase_month: int = 0
+
+ 
+
+    # NEW: Market profile assignment
+
+    market_profile: str = "orange_beach"  # Name reference to market_profiles config
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/types.py` (lines 10-20)
+
+- Action: Add `market_profile: str = "orange_beach"` field
+
+- **Backward compatibility:** Default value ensures existing code works
+
+- **Future-proofing:** Enables per-unit market override in Phase 2 (roadmap item)
+
+ 
+
+#### SimulationResult DataFrame Extensions
+
+ 
+
+**Monthly DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description | Example Value |
+
+|-------------|------|-------------|---------------|
+
+| `Seasonality_Enabled` | bool | Whether seasonality active this month | True |
+
+| `ADR_Base` | float | Pre-multiplier ADR for the year | $425.00 |
+
+| `ADR_Seasonal_Multiplier` | float | This month's ADR multiplier | 1.35 (June) |
+
+| `ADR_Effective` | float | Actual ADR used (base × multiplier × inflation) | $574.88 |
+
+| `Occupancy_Base` | float | Pre-multiplier occupancy | 0.78 |
+
+| `Occupancy_Seasonal_Multiplier` | float | This month's occupancy multiplier | 1.15 (June) |
+
+| `Occupancy_Effective` | float | Actual occupancy used | 0.897 (89.7%) |
+
+| `Revenue_Seasonal_Adjustment` | float | Delta from flat revenue | +$8,432 (peak season) |
+
+ 
+
+**Units DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `Unit_Market_Profile` | str | Market this unit belongs to |
+
+| `Unit_ADR_Effective` | float | This unit's ADR this month |
+
+| `Unit_Occupancy_Effective` | float | This unit's occupancy this month |
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/simulator.py` (lines 450-500, recording section)
+
+- Action: Add new columns to monthly DataFrame construction
+
+- **Backward compatibility:** New columns appended, existing columns unchanged
+
+- **Testing:** Verify CSV export includes new columns
+
+ 
+
+---
+
+ 
+
+### Calculation Logic & Formulas
+
+ 
+
+#### Monthly Revenue Calculation (Replaces Current Logic)
+
+ 
+
+**Current code location:** `ob_str_engine/engine/revenue.py:calculate_gross_revenue()`
+
+ 
+
+**Current logic (v2.3):**
+
+```python
+
+def calculate_gross_revenue(year, units_owned, config):
+
+    base_adr = config["constants"]["operations"]["adrBaseline2BR"]
+
+    occupancy = config["constants"]["operations"]["occupancyBaseline"]
+
+    inflation = config["market"]["revenueInflationRate"]
+
+ 
+
+    adr_this_year = base_adr * (1 + inflation) ** (year - 1)
+
+    gross_monthly = adr_this_year * occupancy * 30 * units_owned  # Flat
+
+    return gross_monthly
+
+```
+
+ 
+
+**New logic (v2.4 with seasonality):**
+
+```python
+
+def calculate_gross_revenue_seasonal(year, month, units, config):
+
+    """
+
+    Calculate gross revenue with seasonal adjustments per unit.
+
+ 
+
+    Args:
+
+        year: Simulation year (1-30)
+
+        month: Simulation month (1-360)
+
+        units: List[Unit] - all units owned this month
+
+        config: Configuration dict with market_profiles
+
+ 
+
+    Returns:
+
+        tuple: (gross_revenue, revenue_details_dict)
+
+    """
+
+    total_revenue = 0.0
+
+    details = {
+
+        "by_market": {},
+
+        "seasonal_adjustment": 0.0,  # vs flat baseline
+
+        "units_breakdown": []
+
+    }
+
+ 
+
+    calendar_month = ((month - 1) % 12) + 1  # 1-12 for Jan-Dec
+
+    days_in_month = get_days_in_month(calendar_month)
+
+ 
+
+    for unit in units:
+
+        # Get market profile for this unit
+
+        market_name = unit.market_profile
+
+        market = config["market_profiles"].get(market_name)
+
+ 
+
+        if not market:
+
+            raise ValueError(f"Unit {unit.unit_id} references unknown market: {market_name}")
+
+ 
+
+        # Base rates
+
+        base_adr = market["baseline"]["adr"]
+
+        base_occupancy = market["baseline"]["occupancy"]
+
+ 
+
+        # Apply revenue inflation (annual)
+
+        inflation_rate = market.get("market", {}).get("revenue_inflation_rate",
+
+                                                       config["market"]["revenueInflationRate"])
+
+        adr_inflated = base_adr * (1 + inflation_rate) ** (year - 1)
+
+ 
+
+        # Apply seasonal multipliers if enabled
+
+        if market.get("seasonality_enabled", False):
+
+            adr_mult = market["seasonality"]["adr_multipliers"][calendar_month - 1]
+
+            occ_mult = market["seasonality"]["occupancy_multipliers"][calendar_month - 1]
+
+        else:
+
+            adr_mult = 1.0
+
+            occ_mult = 1.0
+
+ 
+
+        # Effective rates
+
+        adr_effective = adr_inflated * adr_mult
+
+        occupancy_effective = base_occupancy * occ_mult
+
+ 
+
+        # Calculate revenue for this unit
+
+        unit_revenue = adr_effective * occupancy_effective * days_in_month
+
+        total_revenue += unit_revenue
+
+ 
+
+        # Track details
+
+        flat_revenue = adr_inflated * base_occupancy * days_in_month
+
+        seasonal_delta = unit_revenue - flat_revenue
+
+ 
+
+        details["units_breakdown"].append({
+
+            "unit_id": unit.unit_id,
+
+            "market": market_name,
+
+            "adr_base": base_adr,
+
+            "adr_inflated": adr_inflated,
+
+            "adr_multiplier": adr_mult,
+
+            "adr_effective": adr_effective,
+
+            "occupancy_base": base_occupancy,
+
+            "occupancy_multiplier": occ_mult,
+
+            "occupancy_effective": occupancy_effective,
+
+            "revenue": unit_revenue,
+
+            "seasonal_delta": seasonal_delta
+
+        })
+
+ 
+
+        # Aggregate by market
+
+        if market_name not in details["by_market"]:
+
+            details["by_market"][market_name] = {
+
+                "units": 0,
+
+                "revenue": 0.0,
+
+                "seasonal_delta": 0.0
+
+            }
+
+        details["by_market"][market_name]["units"] += 1
+
+        details["by_market"][market_name]["revenue"] += unit_revenue
+
+        details["by_market"][market_name]["seasonal_delta"] += seasonal_delta
+
+ 
+
+    # Total seasonal adjustment
+
+    details["seasonal_adjustment"] = sum(u["seasonal_delta"] for u in details["units_breakdown"])
+
+ 
+
+    return total_revenue, details
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/revenue.py`
+
+- Action: Add new function `calculate_gross_revenue_seasonal()`, keep old function for backward compatibility
+
+- File: `ob_str_engine/engine/simulator.py` (line ~150, income calculation)
+
+- Action: Replace call to `calculate_gross_revenue()` with seasonal version
+
+- **Testing:** Compare flat vs seasonal for same portfolio (seasonal should show variance)
+
+ 
+
+#### Parity Price Calculation (Updated for Seasonality)
+
+ 
+
+**Current code location:** `ob_str_engine/engine/acquisition.py:calculate_parity_price()`
+
+ 
+
+**Current logic (v2.3):**
+
+```python
+
+def calculate_parity_price(year, config):
+
+    """Calculate price for 6.5% unlevered yield using flat revenue."""
+
+    base_adr = config["constants"]["operations"]["adrBaseline2BR"]
+
+    occupancy = config["constants"]["operations"]["occupancyBaseline"]
+
+ 
+
+    # Annual inflation
+
+    inflation = config["market"]["revenueInflationRate"]
+
+    adr_this_year = base_adr * (1 + inflation) ** (year - 1)
+
+ 
+
+    # Annual gross revenue (flat)
+
+    gross_annual = adr_this_year * occupancy * 365
+
+ 
+
+    # NOI calculation
+
+    mgmt_pct = config["constants"]["operations"]["mgmtPct"]
+
+    capex_pct = config["constants"]["operations"]["capexPct"]
+
+    hoa_inflation = config["constants"]["operations"]["hoaInflationRate"]
+
+    hoa_base = config["constants"]["operations"]["hoaAnnual"]
+
+    hoa_this_year = hoa_base * (1 + hoa_inflation) ** (year - 1)
+
+ 
+
+    noi = gross_annual * (1 - mgmt_pct - capex_pct) - hoa_this_year
+
+ 
+
+    # Parity price for 6.5% yield
+
+    target_yield = config["constants"]["acquisition"]["targetYieldUnlevered"]
+
+    insurance_rate = config["constants"]["operations"]["insuranceRate"]
+
+    tax_rate = config["constants"]["operations"]["propertyTaxRate"]
+
+ 
+
+    price = noi / (target_yield + insurance_rate + tax_rate)
+
+    return price
+
+```
+
+ 
+
+**Updated logic (v2.4 with seasonality):**
+
+```python
+
+def calculate_parity_price(year, config, market_profile_name="orange_beach"):
+
+    """
+
+    Calculate price for 6.5% unlevered yield using seasonal average revenue.
+
+ 
+
+    Args:
+
+        year: Acquisition year (1-30)
+
+        config: Configuration dict
+
+        market_profile_name: Market to price for (default: portfolio default)
+
+ 
+
+    Returns:
+
+        float: Parity price for this market in this year
+
+    """
+
+    # Get market profile
+
+    if market_profile_name is None:
+
+        market_profile_name = config["policies"]["portfolio"].get("default_market", "orange_beach")
+
+ 
+
+    market = config["market_profiles"].get(market_profile_name)
+
+    if not market:
+
+        raise ValueError(f"Unknown market profile: {market_profile_name}")
+
+ 
+
+    # Base rates
+
+    base_adr = market["baseline"]["adr"]
+
+    base_occupancy = market["baseline"]["occupancy"]
+
+ 
+
+    # Apply annual inflation
+
+    inflation = market.get("market", {}).get("revenue_inflation_rate",
+
+                                              config["market"]["revenueInflationRate"])
+
+    adr_this_year = base_adr * (1 + inflation) ** (year - 1)
+
+ 
+
+    # Calculate SEASONAL AVERAGE annual revenue
+
+    if market.get("seasonality_enabled", False):
+
+        monthly_revenues = []
+
+        adr_mults = market["seasonality"]["adr_multipliers"]
+
+        occ_mults = market["seasonality"]["occupancy_multipliers"]
+
+ 
+
+        for month_idx in range(12):
+
+            adr_effective = adr_this_year * adr_mults[month_idx]
+
+            occ_effective = base_occupancy * occ_mults[month_idx]
+
+            days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month_idx]  # Ignore leap years for simplicity
+
+            monthly_revenue = adr_effective * occ_effective * days
+
+            monthly_revenues.append(monthly_revenue)
+
+ 
+
+        gross_annual = sum(monthly_revenues)
+
+    else:
+
+        # Flat calculation (v2.3 behavior)
+
+        gross_annual = adr_this_year * base_occupancy * 365
+
+ 
+
+    # NOI calculation (same as v2.3)
+
+    mgmt_pct = config["constants"]["operations"]["mgmtPct"]
+
+    capex_pct = config["constants"]["operations"]["capexPct"]
+
+    hoa_inflation = config["constants"]["operations"]["hoaInflationRate"]
+
+    hoa_base = market["expenses"].get("hoa_annual",
+
+                                       config["constants"]["operations"]["hoaAnnual"])
+
+    hoa_this_year = hoa_base * (1 + hoa_inflation) ** (year - 1)
+
+ 
+
+    noi = gross_annual * (1 - mgmt_pct - capex_pct) - hoa_this_year
+
+ 
+
+    # Parity price for 6.5% yield
+
+    target_yield = config["constants"]["acquisition"]["targetYieldUnlevered"]
+
+    insurance_rate = market["expenses"].get("insurance_rate",
+
+                                             config["constants"]["operations"]["insuranceRate"])
+
+    tax_rate = market["expenses"].get("property_tax_rate",
+
+                                       config["constants"]["operations"]["propertyTaxRate"])
+
+ 
+
+    price = noi / (target_yield + insurance_rate + tax_rate)
+
+ 
+
+    return price
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/acquisition.py` (lines 50-80)
+
+- Action: Replace function with seasonal-aware version
+
+- **Critical:** Parity price will CHANGE with seasonality enabled. For OB market with provided multipliers:
+
+  - Flat annual revenue: $425 × 0.78 × 365 = $121,278
+
+  - Seasonal annual revenue: ~$108,000 (estimated, will vary)
+
+  - **Parity price will be LOWER with seasonality** (more realistic)
+
+- **Testing:** Compare parity prices with/without seasonality (expect ~10-15% reduction)
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### New Dashboard Page: "Market Profiles & Seasonality"
+
+ 
+
+**Location:** Create `ui/pages/8_market_profiles.py`
+
+ 
+
+**Purpose:** Configure and visualize market profiles and seasonal patterns.
+
+ 
+
+**Sections:**
+
+ 
+
+1. **Market Profile Selector**
+
+   - Dropdown: Select market to view/edit
+
+   - Button: "Add New Market Profile"
+
+   - Button: "Clone from Existing"
+
+ 
+
+2. **Market Configuration Form**
+
+   - Display name (text input)
+
+   - Description (text area)
+
+   - Seasonality enabled toggle
+
+   - Baseline ADR (number input)
+
+   - Baseline Occupancy (slider, 0-100%)
+
+   - HOA Annual (number input)
+
+   - Insurance rate (percentage input)
+
+   - Property tax rate (percentage input)
+
+ 
+
+3. **Seasonality Curve Editor**
+
+   - Interactive chart showing 12-month curves:
+
+     - ADR multipliers (bar chart)
+
+     - Occupancy multipliers (bar chart)
+
+     - Combined effect on revenue (line chart)
+
+   - Table: Edit multipliers by month (12 rows × 2 columns)
+
+   - Button: "Reset to Defaults" (revert to flat 1.0)
+
+   - Button: "Load OB Template" (apply Jorge's assumptions)
+
+ 
+
+4. **Revenue Impact Visualization**
+
+   - Chart: Monthly revenue comparison (flat vs seasonal) for a single unit
+
+   - Metrics:
+
+     - Annual revenue (flat): $XXX,XXX
+
+     - Annual revenue (seasonal): $XXX,XXX
+
+     - Difference: +/- $XX,XXX (+/-X%)
+
+   - Peak month revenue vs off-season (highlight variance)
+
+ 
+
+5. **Parity Price Impact**
+
+   - Table: Parity price by year (1, 5, 10, 15, 20, 25, 30) with/without seasonality
+
+   - Chart: Parity price over time (line chart, two lines)
+
+   - Callout: "Seasonality reduces parity price by ~$XX,XXX (X%) in Year 1"
+
+ 
+
+**Implementation Notes:**
+
+- Reuse existing UI patterns from `ui/pages/1_run_control.py` (config editing)
+
+- Use Plotly for interactive charts (consistent with existing pages)
+
+- Live preview: Changes to multipliers update charts immediately
+
+- Save button: Update config and re-run simulation (if desired)
+
+ 
+
+#### Enhancements to Existing Pages
+
+ 
+
+**Page 1: Run Control & Config (`ui/pages/1_run_control.py`)**
+
+ 
+
+Add to KPI cards section:
+
+- **Seasonality Status**: "Enabled (2 markets)" or "Disabled"
+
+- **Effective Occupancy**: "67% avg (seasonal)" vs "78% (flat)"
+
+ 
+
+Add to Portfolio Value chart:
+
+- Optional overlay: Flat projection (dashed line) for comparison
+
+ 
+
+**Page 4: Time Series Analysis (`ui/pages/4_time_series.py`)**
+
+ 
+
+Add new metric options to selector:
+
+- "ADR Effective (Seasonal)" - line chart showing monthly ADR variance
+
+- "Occupancy Effective (Seasonal)" - line chart showing monthly occupancy
+
+- "Revenue Seasonal Adjustment" - bar chart showing monthly delta vs flat
+
+ 
+
+Add filter: "Show seasonal variance only" (hides flat months)
+
+ 
+
+**Page 5: Unit Comparison (`ui/pages/5_unit_comparison.py`)**
+
+ 
+
+Add to unit comparison table:
+
+- Column: "Market Profile"
+
+- Column: "Avg Seasonal Adjustment" (+/-X% vs flat)
+
+ 
+
+Add chart: "Unit Revenue by Month" showing seasonality curves per unit
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+#### 1. Main Simulation Loop (simulator.py)
+
+ 
+
+**File:** `ob_str_engine/engine/simulator.py`
+
+**Function:** `simulate()`
+
+**Current line:** ~150 (income calculation in monthly loop)
+
+ 
+
+**Current code:**
+
+```python
+
+# Month: Income
+
+gross_monthly = revenue.calculate_gross_revenue(year, units_owned, cfg)
+
+external_savings = cfg["constants"]["financial"]["annualSavings"] / 12.0
+
+operating_cash += gross_monthly + external_savings
+
+```
+
+ 
+
+**Updated code:**
+
+```python
+
+# Month: Income (with seasonality)
+
+if cfg.get("market_profiles"):
+
+    # v2.4: Seasonal revenue per unit
+
+    gross_monthly, revenue_details = revenue.calculate_gross_revenue_seasonal(
+
+        year, month, units, cfg
+
+    )
+
+    # Store details for output
+
+    monthly_revenue_breakdown = revenue_details
+
+else:
+
+    # v2.3 fallback: Flat revenue
+
+    gross_monthly = revenue.calculate_gross_revenue(year, units_owned, cfg)
+
+    monthly_revenue_breakdown = None
+
+ 
+
+external_savings = cfg["constants"]["financial"]["annualSavings"] / 12.0
+
+operating_cash += gross_monthly + external_savings
+
+```
+
+ 
+
+**Impact:** Revenue calculation now unit-aware and market-aware.
+
+ 
+
+#### 2. Acquisition Logic (acquisition.py)
+
+ 
+
+**File:** `ob_str_engine/engine/acquisition.py`
+
+**Function:** `attempt_purchase()`
+
+**Current line:** ~120 (parity price calculation)
+
+ 
+
+**Current code:**
+
+```python
+
+price_parity = calculate_parity_price(year, cfg)
+
+```
+
+ 
+
+**Updated code:**
+
+```python
+
+# Get default market for new purchases
+
+default_market = cfg["policies"]["portfolio"].get("default_market", "orange_beach")
+
+price_parity = calculate_parity_price(year, cfg, market_profile_name=default_market)
+
+ 
+
+# When creating new unit, assign market
+
+new_unit = Unit(
+
+    value=price_parity,
+
+    debt=debt,
+
+    monthly_payment=payment,
+
+    rate=rate,
+
+    last_refi_month=month,
+
+    unit_id=len(units),
+
+    cash_invested=down_payment + closing_costs,
+
+    purchase_month=month,
+
+    market_profile=default_market  # NEW
+
+)
+
+```
+
+ 
+
+**Impact:** New properties automatically assigned to default market.
+
+ 
+
+#### 3. Unit Creation (types.py)
+
+ 
+
+**File:** `ob_str_engine/engine/types.py`
+
+**Dataclass:** `Unit`
+
+**Current line:** ~10
+
+ 
+
+**Action:** Add `market_profile: str = "orange_beach"` field (already specified in Data Model section).
+
+ 
+
+**Impact:** All unit objects now track their market assignment.
+
+ 
+
+#### 4. Validation Framework (validation/checks.py)
+
+ 
+
+**File:** `ob_str_engine/validation/checks.py`
+
+**Current:** 21 validation functions
+
+ 
+
+**New validations to add:**
+
+ 
+
+```python
+
+def validate_market_profiles_exist(config: dict) -> ValidationResult:
+
+    """Ensure market_profiles section is well-formed."""
+
+    if "market_profiles" not in config:
+
+        return ValidationResult(
+
+            check_name="market_profiles_exist",
+
+            status="warning",
+
+            message="No market_profiles defined; falling back to v2.3 flat revenue",
+
+            details={}
+
+        )
+
+ 
+
+    profiles = config["market_profiles"]
+
+    if not profiles or len(profiles) == 0:
+
+        return ValidationResult(
+
+            check_name="market_profiles_exist",
+
+            status="error",
+
+            message="market_profiles section is empty",
+
+            details={}
+
+        )
+
+ 
+
+    return ValidationResult(
+
+        check_name="market_profiles_exist",
+
+        status="pass",
+
+        message=f"Found {len(profiles)} market profiles",
+
+        details={"profiles": list(profiles.keys())}
+
+    )
+
+ 
+
+ 
+
+def validate_seasonality_multipliers(config: dict) -> ValidationResult:
+
+    """Verify monthly multipliers are reasonable (0.3-3.0 range)."""
+
+    if "market_profiles" not in config:
+
+        return ValidationResult(
+
+            check_name="seasonality_multipliers",
+
+            status="skip",
+
+            message="No market profiles to validate",
+
+            details={}
+
+        )
+
+ 
+
+    issues = []
+
+    for market_name, market in config["market_profiles"].items():
+
+        if not market.get("seasonality_enabled", False):
+
+            continue
+
+ 
+
+        seasonality = market.get("seasonality", {})
+
+        adr_mults = seasonality.get("adr_multipliers", [])
+
+        occ_mults = seasonality.get("occupancy_multipliers", [])
+
+ 
+
+        # Check length
+
+        if len(adr_mults) != 12:
+
+            issues.append(f"{market_name}: adr_multipliers has {len(adr_mults)} values, need 12")
+
+        if len(occ_mults) != 12:
+
+            issues.append(f"{market_name}: occupancy_multipliers has {len(occ_mults)} values, need 12")
+
+ 
+
+        # Check range
+
+        for idx, mult in enumerate(adr_mults):
+
+            if mult < 0.3 or mult > 3.0:
+
+                issues.append(f"{market_name}: adr_multipliers[{idx}] = {mult} (out of range 0.3-3.0)")
+
+ 
+
+        for idx, mult in enumerate(occ_mults):
+
+            if mult < 0.3 or mult > 3.0:
+
+                issues.append(f"{market_name}: occupancy_multipliers[{idx}] = {mult} (out of range 0.3-3.0)")
+
+ 
+
+    if issues:
+
+        return ValidationResult(
+
+            check_name="seasonality_multipliers",
+
+            status="error",
+
+            message=f"Found {len(issues)} issues with seasonal multipliers",
+
+            details={"issues": issues}
+
+        )
+
+ 
+
+    return ValidationResult(
+
+        check_name="seasonality_multipliers",
+
+        status="pass",
+
+        message="All seasonal multipliers in valid range",
+
+        details={}
+
+    )
+
+ 
+
+ 
+
+def validate_market_references(config: dict, result: SimulationResult) -> ValidationResult:
+
+    """Ensure all units reference valid market profiles."""
+
+    if "market_profiles" not in config:
+
+        return ValidationResult(
+
+            check_name="market_references",
+
+            status="skip",
+
+            message="No market profiles to validate",
+
+            details={}
+
+        )
+
+ 
+
+    defined_markets = set(config["market_profiles"].keys())
+
+ 
+
+    # Extract unique markets from units DataFrame
+
+    if not result.units.empty:
+
+        referenced_markets = set(result.units["Unit_Market_Profile"].unique())
+
+ 
+
+        invalid = referenced_markets - defined_markets
+
+        if invalid:
+
+            return ValidationResult(
+
+                check_name="market_references",
+
+                status="error",
+
+                message=f"Units reference undefined markets: {invalid}",
+
+                details={"invalid_markets": list(invalid)}
+
+            )
+
+ 
+
+    return ValidationResult(
+
+        check_name="market_references",
+
+        status="pass",
+
+        message="All market references valid",
+
+        details={}
+
+    )
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/validation/checks.py` (append to end)
+
+- File: `ob_str_engine/validation/__init__.py` (add to `ALL_CHECKS` list)
+
+- **Testing:** Run validation suite on sample configs (valid, invalid, missing fields)
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.1.1: Market Profile Configuration**
+
+- [ ] Config JSON loads successfully with `market_profiles` section
+
+- [ ] Default "orange_beach" profile present with Jorge's assumptions
+
+- [ ] "generic" fallback profile present
+
+- [ ] Config validation passes for well-formed profiles
+
+- [ ] Config validation fails gracefully for malformed profiles (bad multipliers, missing fields)
+
+ 
+
+**AC-1.1.2: Seasonal Revenue Calculation**
+
+- [ ] Monthly revenue varies by month for Orange Beach market (peak > shoulder > off-season)
+
+- [ ] Annual sum of seasonal revenue matches expected average (within 1%)
+
+- [ ] Flat revenue (seasonality disabled) matches v2.3 baseline exactly
+
+- [ ] Scenario comparison shows measurable difference (seasonal vs flat)
+
+ 
+
+**AC-1.1.3: Parity Price Integration**
+
+- [ ] Parity price with seasonality enabled is 10-15% lower than flat (for OB market)
+
+- [ ] Parity price with seasonality disabled matches v2.3 exactly
+
+- [ ] Parity price increases with inflation over 30 years as expected
+
+ 
+
+**AC-1.1.4: Backward Compatibility**
+
+- [ ] Existing v2.3 config (without market_profiles) runs without errors
+
+- [ ] Revenue calculation falls back to flat when market_profiles missing
+
+- [ ] All existing validation checks still pass
+
+ 
+
+**AC-1.1.5: Output Data Integrity**
+
+- [ ] New columns appear in monthly DataFrame (Seasonality_Enabled, ADR_Effective, etc.)
+
+- [ ] CSV export includes new columns
+
+- [ ] Units DataFrame includes market profile column
+
+- [ ] No regression in existing columns (all 70+ columns still present and correct)
+
+ 
+
+**AC-1.1.6: UI Functionality**
+
+- [ ] New "Market Profiles" page accessible from sidebar
+
+- [ ] Can edit ADR/occupancy multipliers and see live chart update
+
+- [ ] Parity price impact visualization shows expected delta
+
+- [ ] Existing pages (Run Control, Time Series) show seasonal metrics
+
+- [ ] No UI errors or broken charts
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: Flat vs Seasonal Revenue Comparison
+
+ 
+
+**Setup:**
+
+- Run simulation with seasonality disabled (multipliers = 1.0)
+
+- Run identical simulation with seasonality enabled (OB profile)
+
+- Compare outputs
+
+ 
+
+**Expected Results:**
+
+- Flat: Monthly revenue constant (accounting for inflation)
+
+- Seasonal: Revenue varies by month (low in Feb, high in Jul)
+
+- Annual revenue (seasonal) is 10-20% lower than flat (more realistic)
+
+- All other logic (debt, reserves, etc.) works correctly with variable revenue
+
+ 
+
+**Pass Criteria:**
+
+- Seasonal revenue shows expected variance (peak > shoulder > off-season)
+
+- Simulation completes without errors for both scenarios
+
+- Cash flow remains positive (or negative months are expected/handled)
+
+ 
+
+#### Test 2: Parity Price Accuracy
+
+ 
+
+**Setup:**
+
+- Calculate parity price for Year 1, OB market, seasonality enabled
+
+- Manually verify calculation using seasonal average revenue
+
+ 
+
+**Manual Calculation:**
+
+```
+
+Base ADR: $425
+
+Inflation Year 1: 0% (year 1)
+
+Monthly revenues:
+
+  Jan: $425 × 0.85 × 0.78 × 0.58 × 31 = $5,979
+
+  Feb: $425 × 0.85 × 0.78 × 0.58 × 28 = $5,401
+
+  ... (calculate all 12 months)
+
+Annual gross: Sum(monthly) ≈ $108,500 (estimate)
+
+ 
+
+NOI: $108,500 × (1 - 0.2 - 0.1) - $12,800 = $75,950 - $12,800 = $63,150
+
+ 
+
+Parity: $63,150 / (0.065 + 0.04 + 0.0055) = $63,150 / 0.1105 = $571,493
+
+```
+
+ 
+
+**Expected Results:**
+
+- Parity price from model matches manual calculation (within $100)
+
+- Parity price is ~30% lower than v2.3 flat assumption (~$822k)
+
+ 
+
+**Pass Criteria:**
+
+- Parity price calculation matches manual (within 0.1%)
+
+- Price is reasonable for OB market (~$550k-$600k for Year 1)
+
+ 
+
+#### Test 3: Multi-Market Portfolio (Future-Proofing)
+
+ 
+
+**Setup:**
+
+- Create config with 2 markets: "orange_beach" and "lake_generic"
+
+- Assign units manually to different markets in code (simulate mixed portfolio)
+
+- Run simulation
+
+ 
+
+**Expected Results:**
+
+- Revenue aggregates correctly across markets
+
+- Each unit uses its assigned market's parameters
+
+- Output DataFrame shows correct market assignment per unit
+
+- No calculation errors or inconsistencies
+
+ 
+
+**Pass Criteria:**
+
+- Portfolio revenue = sum of per-unit revenues (exact match)
+
+- Units DataFrame shows correct market_profile per unit
+
+- Simulation completes successfully
+
+ 
+
+#### Test 4: Edge Cases
+
+ 
+
+**Test 4a: Property Purchased Mid-Year (March)**
+
+- Purchase property in Month 3 (March)
+
+- Verify March revenue uses March multiplier (shoulder season)
+
+- Verify partial month calculation is correct
+
+ 
+
+**Test 4b: Leap Year Handling**
+
+- Run 30-year simulation (includes 7-8 leap years)
+
+- Verify February revenue calculation handles 28 vs 29 days
+
+- Verify annual totals are consistent
+
+ 
+
+**Test 4c: Extreme Multipliers**
+
+- Set ADR multiplier to 3.0 (300% of baseline)
+
+- Set occupancy multiplier to 0.1 (10% of baseline)
+
+- Verify revenue calculation doesn't break
+
+- Verify validation catches if outside 0.3-3.0 range
+
+ 
+
+**Pass Criteria:**
+
+- All edge cases handled gracefully (no crashes)
+
+- Revenue calculations mathematically correct
+
+- Validation warnings/errors appear as expected
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 2: Monte Carlo Integration
+
+ 
+
+**Requirement:** Phase 2.1 will randomize seasonality multipliers across MC runs.
+
+ 
+
+**Design Consideration:**
+
+- Store multipliers as lists (already done) not hardcoded constants
+
+- Add optional `variance` parameter to each multiplier (e.g., `"adr_multipliers_variance": [0.05, 0.05, ...]`)
+
+- Monte Carlo engine can apply `multiplier × (1 + random.normal(0, variance))` per run
+
+- No changes to core calculation logic needed
+
+ 
+
+**Action for Phase 1 Implementation:**
+
+- Keep multiplier arrays simple (12 floats) for now
+
+- Document in code comments: "Phase 2: Add variance parameter for MC"
+
+- Ensure calculation functions accept multipliers as parameters (not hardcoded)
+
+ 
+
+#### For Phase 2: Per-Unit Seasonality Overrides
+
+ 
+
+**Requirement:** Roadmap Phase 2 mentions per-unit seasonality (beachfront premium, etc.)
+
+ 
+
+**Design Consideration:**
+
+- Unit dataclass already has `market_profile` field
+
+- Could extend to: `market_profile: str` OR `seasonality_override: dict`
+
+- Override would merge with market defaults (e.g., beachfront unit gets +10% ADR multiplier)
+
+ 
+
+**Action for Phase 1 Implementation:**
+
+- Use `market_profile` string reference (simple)
+
+- In Phase 2, add `unit_seasonality_adjustments` field (optional dict)
+
+- Calculation logic already loops per-unit, so override logic is easy to add
+
+ 
+
+#### For Phase 3: Market Intelligence Integration
+
+ 
+
+**Requirement:** Phase 3.2 will pull live AirDNA data to update seasonality curves.
+
+ 
+
+**Design Consideration:**
+
+- Seasonality curves stored as config (editable) not hardcoded
+
+- Add `"last_updated": "2025-12-28"` field to track data freshness
+
+- Add `"data_source": "manual"` field (future: "airdna", "internal", etc.)
+
+- UI should warn if data is >6 months old
+
+ 
+
+**Action for Phase 1 Implementation:**
+
+- Add metadata fields to market_profiles (optional, not required)
+
+- Design schema to be extensible (allow extra fields without breaking)
+
+- Example:
+
+  ```json
+
+  {
+
+    "seasonality": {
+
+      "adr_multipliers": [...],
+
+      "occupancy_multipliers": [...],
+
+      "metadata": {
+
+        "last_updated": "2025-12-28",
+
+        "data_source": "manual",
+
+        "notes": "Based on Jorge's assumptions"
+
+      }
+
+    }
+
+  }
+
+  ```
+
+ 
+
+---
+
+ 
+
+## 1.2 Insurance Modeling (Coastal-Specific)
+
+ 
+
+**Goal:** Accurately model coastal insurance costs and claim dynamics, replacing flat 3.3% assumption with market-specific rates, named storm deductibles, and claim scenarios.
+
+ 
+
+**Complexity:** Medium (M) - 5-7 days
+
+**Dependencies:** 1.1 (market profiles for base rates), 1.3 (events for hurricane claims)
+
+**Priority:** P0 (Highest - critical expense accuracy)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.2.1: Market-Specific Insurance Rates
+
+**User Story:** As a portfolio planner, I need different insurance rates per market so that coastal vs inland properties are priced correctly.
+
+ 
+
+**System shall:**
+
+- Store base insurance rate in market profile (already in 1.1 schema: `"insurance_rate": 0.04`)
+
+- Apply market-specific rate to each unit based on its assigned market
+
+- Support annual insurance inflation per market (default: 7% for coastal, 3% for inland)
+
+- Override global insurance rate when market profile specifies one
+
+ 
+
+#### FR-1.2.2: Named Storm Deductibles
+
+**User Story:** As a risk planner, I need to model hurricane deductibles so that I understand out-of-pocket exposure during catastrophic events.
+
+ 
+
+**System shall:**
+
+- Define named storm deductible as percentage of property value (e.g., 2%)
+
+- Calculate deductible at time of claim (based on current property value, not purchase price)
+
+- Apply deductible BEFORE insurance payout (owner pays deductible out of reserves)
+
+- Track cumulative deductibles paid over simulation (output metric)
+
+ 
+
+#### FR-1.2.3: Flood Insurance (Optional Coverage)
+
+**User Story:** As a coastal property owner, I need to model flood insurance costs for properties in flood zones.
+
+ 
+
+**System shall:**
+
+- Support per-unit flood zone flag (`in_flood_zone: true/false`)
+
+- If in flood zone, add annual flood insurance premium (fixed cost, e.g., $2,500/year)
+
+- Flood premium inflates independently (use general inflation rate or override)
+
+- Flood claims handled separately from named storm (different deductible structure)
+
+ 
+
+#### FR-1.2.4: Insurance Claim Dynamics (Event-Driven)
+
+**User Story:** As a scenario planner, I need to model insurance claims so that I understand cash flow during recovery.
+
+ 
+
+**System shall:**
+
+- Insurance claims triggered by events (defined in 1.3 Event Modeling)
+
+- Event specifies:
+
+  - Repair cost (gross cost before insurance)
+
+  - Insurance coverage percentage (e.g., 90% of costs covered)
+
+  - Deductible percentage (e.g., 2% named storm)
+
+  - Payout delay in months (e.g., 4-6 months typical for hurricanes)
+
+- Owner pays deductible + uncovered costs immediately (draws from reserves)
+
+- Insurance payout arrives X months later (adds to operating cash)
+
+- Track insurance claim status in output (pending, paid, amount)
+
+ 
+
+#### FR-1.2.5: Premium Increases After Claims
+
+**User Story:** As a long-term planner, I need to model insurance rate hikes after claims so that I understand multi-year cost impacts.
+
+ 
+
+**System shall:**
+
+- After a claim, increase insurance premium for affected property by X% (e.g., 15-30%)
+
+- Premium increase persists for Y years (e.g., 3-5 years)
+
+- If market-wide event (hurricane affects all units), increase applies to all units in that market
+
+- Track "surcharge" separately from base rate (for visualization/reporting)
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+#### Config JSON Schema Extensions
+
+ 
+
+**Extend `market_profiles` (from 1.1):**
+
+ 
+
+```json
+
+{
+
+  "market_profiles": {
+
+    "orange_beach": {
+
+      "display_name": "Orange Beach, AL",
+
+ 
+
+      "expenses": {
+
+        "insurance_rate": 0.04,  // 4% of property value (higher than generic 3.3%)
+
+        "property_tax_rate": 0.0055,
+
+        "hoa_annual": 12800.0,
+
+ 
+
+        // NEW: Insurance modeling details
+
+        "insurance": {
+
+          "base_rate": 0.04,
+
+          "inflation_rate": 0.07,  // 7% annual increase (coastal typical)
+
+          "named_storm_deductible_pct": 0.02,  // 2% of property value
+
+          "flood_zone_premium": 2500.0,  // Annual cost if in flood zone
+
+          "flood_zone_inflation_rate": 0.04,
+
+          "claim_surcharge": {
+
+            "increase_pct": 0.20,  // 20% increase after claim
+
+            "duration_years": 5    // Surcharge lasts 5 years
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+
+}
+
+```
+
+ 
+
+**Add per-unit flood zone flag:**
+
+ 
+
+Extend `Unit` dataclass (ob_str_engine/engine/types.py):
+
+ 
+
+```python
+
+@dataclass
+
+class Unit:
+
+    value: float
+
+    debt: float
+
+    monthly_payment: float
+
+    rate: float
+
+    last_refi_month: int
+
+    unit_id: int = 0
+
+    cash_invested: float = 0.0
+
+    purchase_month: int = 0
+
+    market_profile: str = "orange_beach"
+
+ 
+
+    # NEW: Insurance-specific fields
+
+    in_flood_zone: bool = False  # Whether this unit requires flood insurance
+
+    insurance_surcharge_until_month: int = 0  # Month when surcharge expires (0 = no surcharge)
+
+    insurance_surcharge_pct: float = 0.0  # Current surcharge percentage
+
+```
+
+ 
+
+**Event schema extension (see 1.3 for full event spec):**
+
+ 
+
+```json
+
+{
+
+  "events": [
+
+    {
+
+      "name": "Hurricane Sally",
+
+      "year": 3,
+
+      "month": 9,
+
+      "type": "catastrophic",
+
+      "scope": "portfolio",  // or "unit" with unit_id
+
+ 
+
+      "impacts": {
+
+        "repair_cost": 50000
+
+      },
+
+ 
+
+      // NEW: Insurance claim details
+
+      "insurance_claim": {
+
+        "coverage_pct": 0.90,  // Insurance covers 90%
+
+        "deductible_pct": 0.02,  // 2% named storm deductible
+
+        "payout_delay_months": 4,
+
+        "triggers_surcharge": true  // Apply rate increase after claim
+
+      }
+
+    }
+
+  ]
+
+}
+
+```
+
+ 
+
+#### SimulationResult DataFrame Extensions
+
+ 
+
+**Monthly DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description | Example |
+
+|-------------|------|-------------|---------|
+
+| `Insurance_Premium_Base` | float | Portfolio base insurance (before surcharges) | $1,800/mo |
+
+| `Insurance_Surcharge` | float | Additional premium from past claims | $360/mo (20% of base) |
+
+| `Insurance_Premium_Total` | float | Total insurance paid this month | $2,160/mo |
+
+| `Flood_Insurance_Premium` | float | Flood insurance costs (units in flood zones) | $208/mo ($2,500/yr) |
+
+| `Insurance_Claim_Pending_Amount` | float | Insurance payout expected (not yet received) | $45,000 |
+
+| `Insurance_Claim_Received` | float | Insurance payout received this month | $0 (or $45,000) |
+
+| `Cumulative_Deductibles_Paid` | float | Total deductibles paid to date | $16,000 |
+
+| `Cumulative_Insurance_Received` | float | Total insurance payouts received | $90,000 |
+
+ 
+
+**Units DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `Unit_In_Flood_Zone` | bool | Whether unit requires flood insurance |
+
+| `Unit_Insurance_Base_Rate` | float | Current base insurance rate (market default) |
+
+| `Unit_Insurance_Surcharge_Pct` | float | Current surcharge percentage |
+
+| `Unit_Insurance_Surcharge_Until_Month` | int | Month when surcharge expires |
+
+| `Unit_Insurance_Premium` | float | Total insurance this month (base + surcharge + flood) |
+
+| `Unit_Deductibles_Paid` | float | Cumulative deductibles paid for this unit |
+
+ 
+
+---
+
+ 
+
+### Calculation Logic & Formulas
+
+ 
+
+#### Monthly Insurance Premium Calculation
+
+ 
+
+**Current code location:** `ob_str_engine/engine/simulator.py` line ~180 (expense calculation)
+
+ 
+
+**Current logic (v2.3):**
+
+```python
+
+# Operating expenses
+
+insurance = total_portfolio_value * insurance_rate / 12.0
+
+```
+
+ 
+
+**New logic (v2.4):**
+
+ 
+
+```python
+
+def calculate_insurance_premium(year, month, units, config):
+
+    """
+
+    Calculate monthly insurance premium with market-specific rates,
+
+    flood insurance, and surcharges.
+
+ 
+
+    Args:
+
+        year: Simulation year (1-30)
+
+        month: Simulation month (1-360)
+
+        units: List[Unit] - all units owned
+
+        config: Configuration dict
+
+ 
+
+    Returns:
+
+        dict: {
+
+            "base_premium": float,
+
+            "surcharge": float,
+
+            "flood_premium": float,
+
+            "total_premium": float,
+
+            "by_unit": list of dicts
+
+        }
+
+    """
+
+    total_base = 0.0
+
+    total_surcharge = 0.0
+
+    total_flood = 0.0
+
+    by_unit = []
+
+ 
+
+    for unit in units:
+
+        # Get market insurance config
+
+        market = config["market_profiles"].get(unit.market_profile)
+
+        ins_config = market["expenses"].get("insurance", {})
+
+ 
+
+        # Base rate with inflation
+
+        base_rate = ins_config.get("base_rate", 0.04)
+
+        inflation_rate = ins_config.get("inflation_rate", 0.07)
+
+        inflated_rate = base_rate * (1 + inflation_rate) ** (year - 1)
+
+ 
+
+        # Base premium for this unit
+
+        base_premium_annual = unit.value * inflated_rate
+
+        base_premium_monthly = base_premium_annual / 12.0
+
+        total_base += base_premium_monthly
+
+ 
+
+        # Surcharge (if active)
+
+        surcharge_monthly = 0.0
+
+        if unit.insurance_surcharge_until_month > 0 and month <= unit.insurance_surcharge_until_month:
+
+            surcharge_monthly = base_premium_monthly * unit.insurance_surcharge_pct
+
+            total_surcharge += surcharge_monthly
+
+ 
+
+        # Flood insurance (if in flood zone)
+
+        flood_monthly = 0.0
+
+        if unit.in_flood_zone:
+
+            flood_base = ins_config.get("flood_zone_premium", 2500.0)
+
+            flood_inflation = ins_config.get("flood_zone_inflation_rate", 0.04)
+
+            flood_annual = flood_base * (1 + flood_inflation) ** (year - 1)
+
+            flood_monthly = flood_annual / 12.0
+
+            total_flood += flood_monthly
+
+ 
+
+        # Unit total
+
+        unit_total = base_premium_monthly + surcharge_monthly + flood_monthly
+
+ 
+
+        by_unit.append({
+
+            "unit_id": unit.unit_id,
+
+            "base_rate": inflated_rate,
+
+            "base_premium": base_premium_monthly,
+
+            "surcharge_pct": unit.insurance_surcharge_pct if month <= unit.insurance_surcharge_until_month else 0.0,
+
+            "surcharge_premium": surcharge_monthly,
+
+            "flood_premium": flood_monthly,
+
+            "total_premium": unit_total
+
+        })
+
+ 
+
+    return {
+
+        "base_premium": total_base,
+
+        "surcharge": total_surcharge,
+
+        "flood_premium": total_flood,
+
+        "total_premium": total_base + total_surcharge + total_flood,
+
+        "by_unit": by_unit
+
+    }
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: Create new `ob_str_engine/engine/insurance.py` (new module)
+
+- File: `ob_str_engine/engine/simulator.py` line ~180
+
+- Action: Replace flat `insurance = total_value × rate / 12` with call to new function
+
+- **Testing:** Compare v2.3 flat vs v2.4 inflating rates (7% annual growth is significant over 30 years)
+
+ 
+
+#### Insurance Claim Processing (Event-Driven)
+
+ 
+
+**Integration point:** `ob_str_engine/engine/events.py` (to be created in 1.3)
+
+ 
+
+**Logic:** When event with `insurance_claim` is triggered:
+
+ 
+
+```python
+
+def process_insurance_claim(event, units, config, operating_cash, month):
+
+    """
+
+    Process insurance claim from an event.
+
+ 
+
+    Returns:
+
+        tuple: (updated_operating_cash, claim_pending, surcharge_updates)
+
+    """
+
+    claim = event["insurance_claim"]
+
+    repair_cost = event["impacts"]["repair_cost"]
+
+ 
+
+    # Calculate covered amount
+
+    covered_amount = repair_cost * claim["coverage_pct"]
+
+    deductible_pct = claim["deductible_pct"]
+
+ 
+
+    # Determine deductible base (property value or repair cost?)
+
+    # For named storm: deductible is % of property value
+
+    # For other: deductible is % of repair cost
+
+    if event["type"] == "catastrophic":
+
+        # Named storm: deductible = % of current property value
+
+        if event["scope"] == "portfolio":
+
+            deductible_base = sum(u.value for u in units)
+
+        else:
+
+            unit = units[event["unit_id"]]
+
+            deductible_base = unit.value
+
+    else:
+
+        # Other claims: deductible = % of repair cost
+
+        deductible_base = repair_cost
+
+ 
+
+    deductible_amount = deductible_base * deductible_pct
+
+ 
+
+    # Out-of-pocket cost (paid immediately)
+
+    out_of_pocket = deductible_amount + (repair_cost - covered_amount)
+
+    operating_cash -= out_of_pocket
+
+ 
+
+    # Insurance payout (arrives later)
+
+    payout_amount = covered_amount - deductible_amount
+
+    payout_month = month + claim["payout_delay_months"]
+
+ 
+
+    claim_pending = {
+
+        "payout_amount": payout_amount,
+
+        "payout_month": payout_month,
+
+        "event_name": event["name"]
+
+    }
+
+ 
+
+    # Apply surcharge if applicable
+
+    surcharge_updates = []
+
+    if claim.get("triggers_surcharge", False):
+
+        market = config["market_profiles"][units[0].market_profile]  # Assume same market for simplicity
+
+        surcharge_config = market["expenses"]["insurance"]["claim_surcharge"]
+
+ 
+
+        increase_pct = surcharge_config["increase_pct"]
+
+        duration_years = surcharge_config["duration_years"]
+
+        surcharge_until_month = month + (duration_years * 12)
+
+ 
+
+        # Apply to all units in portfolio event, or just one unit
+
+        if event["scope"] == "portfolio":
+
+            affected_units = units
+
+        else:
+
+            affected_units = [units[event["unit_id"]]]
+
+ 
+
+        for unit in affected_units:
+
+            surcharge_updates.append({
+
+                "unit_id": unit.unit_id,
+
+                "surcharge_pct": increase_pct,
+
+                "surcharge_until_month": surcharge_until_month
+
+            })
+
+ 
+
+    return operating_cash, claim_pending, surcharge_updates
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- Requires event system (1.3) to be implemented first
+
+- Insurance claim logic called from event processor
+
+- Modifies `operating_cash` (immediate deductible payment)
+
+- Creates pending payout (tracked in simulation state)
+
+- Updates `unit.insurance_surcharge_*` fields
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### Enhancements to Existing Pages
+
+ 
+
+**Page 1: Run Control & Config**
+
+ 
+
+Add to KPI cards:
+
+- **Insurance Rate**: "4.0% base + 1.2% surcharge = 5.2% effective"
+
+- **Flood Coverage**: "3 units in flood zone (+$7,500/yr)"
+
+ 
+
+**Page 3: Cash Flow Anatomy**
+
+ 
+
+Add expense breakdown rows:
+
+- "Base Insurance Premium"
+
+- "Insurance Surcharge (from claims)"
+
+- "Flood Insurance"
+
+- Total Insurance
+
+ 
+
+Add waterfall node: "Insurance Claim Payout" (positive inflow)
+
+ 
+
+**Page 4: Time Series Analysis**
+
+ 
+
+Add new metric options:
+
+- "Insurance Premium Total" (line chart, show base + surcharge stacked)
+
+- "Insurance Surcharge %" (line chart, % of base rate over time)
+
+- "Cumulative Deductibles Paid" (area chart)
+
+- "Insurance Claim Pending vs Received" (bar chart, show timing gap)
+
+ 
+
+**Page 5: Unit Comparison**
+
+ 
+
+Add columns:
+
+- "Flood Zone" (Yes/No badge)
+
+- "Insurance Rate" (base + surcharge)
+
+- "Deductibles Paid" (cumulative)
+
+ 
+
+#### New Dashboard Section: "Insurance Exposure"
+
+ 
+
+**Location:** Add tab to Page 4 (Time Series) or create new page
+
+ 
+
+**Purpose:** Visualize insurance risk and cost structure.
+
+ 
+
+**Components:**
+
+ 
+
+1. **Insurance Cost Trends**
+
+   - Line chart: Total insurance premium over 30 years
+
+   - Show base (green), surcharge (yellow), flood (blue) stacked
+
+   - Highlight claim events as vertical markers
+
+ 
+
+2. **Deductible Exposure Table**
+
+   - Per-unit deductible amounts (current property value × 2%)
+
+   - Portfolio total deductible exposure
+
+   - Callout: "If hurricane hits today, you'd pay $XX,XXX out-of-pocket"
+
+ 
+
+3. **Claim History & Projections**
+
+   - Table: All insurance claims (scheduled events)
+
+     - Columns: Year, Month, Event, Repair Cost, Deductible, Insurance Payout, Delay
+
+   - Total claims summary
+
+ 
+
+4. **Surcharge Timeline**
+
+   - Gantt chart: Show when surcharges are active per unit
+
+   - Example: "Unit 1 surcharge ends in Month 84, Unit 2 surcharge ends in Month 120"
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+#### 1. Expense Calculation (simulator.py)
+
+ 
+
+**File:** `ob_str_engine/engine/simulator.py`
+
+**Current line:** ~180 (operating expenses)
+
+ 
+
+**Current code:**
+
+```python
+
+# Property Insurance
+
+insurance = total_portfolio_value * cfg["constants"]["operations"]["insuranceRate"] / 12.0
+
+operating_cash -= insurance
+
+```
+
+ 
+
+**Updated code:**
+
+```python
+
+# Property Insurance (with market-specific rates, surcharges, flood)
+
+from ob_str_engine.engine.insurance import calculate_insurance_premium
+
+ 
+
+insurance_breakdown = calculate_insurance_premium(year, month, units, cfg)
+
+insurance_total = insurance_breakdown["total_premium"]
+
+operating_cash -= insurance_total
+
+ 
+
+# Store for output
+
+monthly_insurance_base = insurance_breakdown["base_premium"]
+
+monthly_insurance_surcharge = insurance_breakdown["surcharge"]
+
+monthly_insurance_flood = insurance_breakdown["flood_premium"]
+
+```
+
+ 
+
+**Impact:** Insurance calculation now unit-aware, market-aware, and time-varying.
+
+ 
+
+#### 2. Event Processing (events.py - to be created in 1.3)
+
+ 
+
+**File:** `ob_str_engine/engine/events.py` (new)
+
+**Function:** `process_monthly_events()`
+
+ 
+
+**Logic:** Check for insurance claims in triggered events, call `process_insurance_claim()`.
+
+ 
+
+**Integration:** Event system (1.3) will call insurance module when claim present.
+
+ 
+
+#### 3. Unit Creation (acquisition.py)
+
+ 
+
+**File:** `ob_str_engine/engine/acquisition.py`
+
+**Function:** `attempt_purchase()`
+
+ 
+
+**Updated code:**
+
+```python
+
+# When creating new unit, assign flood zone status
+
+# For now, default to False (not in flood zone)
+
+# Phase 2: Add per-property override or market default
+
+ 
+
+new_unit = Unit(
+
+    value=price_parity,
+
+    debt=debt,
+
+    monthly_payment=payment,
+
+    rate=rate,
+
+    last_refi_month=month,
+
+    unit_id=len(units),
+
+    cash_invested=down_payment + closing_costs,
+
+    purchase_month=month,
+
+    market_profile=default_market,
+
+ 
+
+    # NEW: Insurance fields
+
+    in_flood_zone=False,  # TODO: Make configurable per unit
+
+    insurance_surcharge_until_month=0,
+
+    insurance_surcharge_pct=0.0
+
+)
+
+```
+
+ 
+
+**Future Enhancement (Phase 2):**
+
+- Add `"flood_zone_probability": 0.3` to market profile
+
+- Randomly assign flood zone status at acquisition (Monte Carlo)
+
+- Or allow per-property override in config
+
+ 
+
+#### 4. Validation Framework
+
+ 
+
+**File:** `ob_str_engine/validation/checks.py`
+
+ 
+
+**New validations:**
+
+ 
+
+```python
+
+def validate_insurance_config(config: dict) -> ValidationResult:
+
+    """Ensure insurance config is reasonable."""
+
+    issues = []
+
+ 
+
+    for market_name, market in config.get("market_profiles", {}).items():
+
+        ins = market.get("expenses", {}).get("insurance", {})
+
+ 
+
+        # Check base rate
+
+        base_rate = ins.get("base_rate", 0.04)
+
+        if base_rate < 0.01 or base_rate > 0.10:
+
+            issues.append(f"{market_name}: base_rate {base_rate} seems unusual (expect 0.01-0.10)")
+
+ 
+
+        # Check deductible
+
+        deductible = ins.get("named_storm_deductible_pct", 0.02)
+
+        if deductible < 0.005 or deductible > 0.10:
+
+            issues.append(f"{market_name}: named_storm_deductible {deductible} seems unusual (expect 0.005-0.10)")
+
+ 
+
+        # Check surcharge duration
+
+        surcharge = ins.get("claim_surcharge", {})
+
+        duration = surcharge.get("duration_years", 5)
+
+        if duration < 1 or duration > 10:
+
+            issues.append(f"{market_name}: surcharge duration {duration} years seems unusual (expect 1-10)")
+
+ 
+
+    if issues:
+
+        return ValidationResult("insurance_config", "warning", f"{len(issues)} insurance config warnings", {"issues": issues})
+
+ 
+
+    return ValidationResult("insurance_config", "pass", "Insurance config looks reasonable", {})
+
+ 
+
+ 
+
+def validate_flood_zone_coverage(result: SimulationResult) -> ValidationResult:
+
+    """Warn if flood zone units but no flood premium."""
+
+    # Check if any units have in_flood_zone=True
+
+    # This requires extending units DataFrame to include flood zone flag
+
+    # Implementation depends on 1.3 event system completion
+
+    return ValidationResult("flood_zone_coverage", "skip", "Validation pending 1.3 completion", {})
+
+```
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.2.1: Market-Specific Insurance Rates**
+
+- [ ] Orange Beach market uses 4.0% base rate (not generic 3.3%)
+
+- [ ] Insurance premium inflates at 7% annually for coastal properties
+
+- [ ] Year 30 insurance premium is significantly higher than Year 1 (verify compound growth)
+
+- [ ] Generic market still uses 3.3% rate (backward compatibility)
+
+ 
+
+**AC-1.2.2: Named Storm Deductibles**
+
+- [ ] Hurricane event triggers 2% deductible (% of property value at time of claim)
+
+- [ ] Deductible is paid from operating cash immediately
+
+- [ ] Insurance payout arrives X months later (configurable delay)
+
+- [ ] Cumulative deductibles tracked in output
+
+ 
+
+**AC-1.2.3: Flood Insurance**
+
+- [ ] Unit in flood zone pays additional $2,500/year (inflated over time)
+
+- [ ] Unit not in flood zone pays $0 flood premium
+
+- [ ] Portfolio with 3 flood zone units shows $7,500/year total flood cost
+
+ 
+
+**AC-1.2.4: Insurance Claim Dynamics**
+
+- [ ] Claim processed correctly (deductible + uncovered costs paid immediately)
+
+- [ ] Payout delayed by specified months
+
+- [ ] Operating cash decreases at claim, increases at payout
+
+- [ ] No double-payment or lost funds
+
+ 
+
+**AC-1.2.5: Premium Increases After Claims**
+
+- [ ] After claim, insurance premium increases by 20% for 5 years
+
+- [ ] Surcharge expires after 5 years (premium returns to base + inflation)
+
+- [ ] Portfolio-wide event applies surcharge to all units in market
+
+- [ ] Per-unit event applies surcharge to only that unit
+
+ 
+
+**AC-1.2.6: Backward Compatibility**
+
+- [ ] v2.3 config without insurance section uses flat 3.3% rate
+
+- [ ] Simulation without events runs normally (no claims, no surcharges)
+
+- [ ] Output columns added, existing columns unchanged
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: Insurance Cost Over Time (No Claims)
+
+ 
+
+**Setup:**
+
+- Run 30-year simulation, OB market, 7 units
+
+- No events (baseline scenario)
+
+- 4% base rate, 7% annual inflation
+
+ 
+
+**Expected Results:**
+
+- Year 1 insurance: 7 units × $600k avg × 4% / 12 = $1,400/month
+
+- Year 10 insurance: 7 units × $806k × 7.61% / 12 ≈ $3,580/month (compounded inflation + appreciation)
+
+- Year 30 insurance: Significantly higher (verify exponential growth)
+
+ 
+
+**Pass Criteria:**
+
+- Insurance premium grows ~7% annually (regression check)
+
+- No surcharges (no claims)
+
+- Output matches manual calculation (within 1%)
+
+ 
+
+#### Test 2: Hurricane Claim with Surcharge
+
+ 
+
+**Setup:**
+
+- Event: Hurricane in Year 3, Month 9
+
+- Repair cost: $50,000
+
+- Coverage: 90%, Deductible: 2%, Payout delay: 4 months
+
+- Surcharge: 20% for 5 years
+
+ 
+
+**Expected Results:**
+
+- Month 33 (Year 3, Month 9):
+
+  - Property value: ~$650k (appreciated)
+
+  - Deductible: $650k × 2% = $13,000
+
+  - Uncovered: $50k × 10% = $5,000
+
+  - Out-of-pocket: $13k + $5k = $18,000 (paid from reserves)
+
+- Month 37 (4 months later):
+
+  - Insurance payout: $50k × 90% - $13k = $45k - $13k = $32,000 received
+
+- Months 33-93 (5 years):
+
+  - Insurance premium increases by 20%
+
+  - Month 34: Base $1,400 × 1.20 = $1,680/month
+
+- Month 94 onward:
+
+  - Surcharge expires, premium returns to base + inflation
+
+ 
+
+**Pass Criteria:**
+
+- Cash flow shows $18k drop at claim month
+
+- Cash flow shows $32k spike at payout month (4 months later)
+
+- Insurance premium chart shows 20% jump at claim month
+
+- Surcharge lasts exactly 60 months (5 years)
+
+ 
+
+#### Test 3: Flood Insurance Cost
+
+ 
+
+**Setup:**
+
+- 3 units in flood zone, 4 units not in flood zone
+
+- Flood premium: $2,500/year/unit
+
+- Flood inflation: 4% annually
+
+ 
+
+**Expected Results:**
+
+- Year 1 flood cost: 3 × $2,500 = $7,500/year = $625/month
+
+- Year 10 flood cost: 3 × ($2,500 × 1.04^9) ≈ $10,665/year = $889/month
+
+- Total insurance = base + surcharge + flood (all components sum correctly)
+
+ 
+
+**Pass Criteria:**
+
+- Portfolio total flood premium matches manual calculation
+
+- Units not in flood zone show $0 flood premium
+
+- Flood premium inflates correctly over time
+
+ 
+
+#### Test 4: Multiple Claims (Surcharge Overlap)
+
+ 
+
+**Setup:**
+
+- Event 1: Hurricane Year 3, triggers 20% surcharge for 5 years (until Year 8)
+
+- Event 2: Hurricane Year 6, triggers another 20% surcharge for 5 years (until Year 11)
+
+ 
+
+**Expected Results:**
+
+- Years 3-5: Surcharge = 20%
+
+- Years 6-8: Surcharges stack? Or cap? (Need business rule)
+
+- **Business Decision Required:** How to handle overlapping surcharges?
+
+  - **Option A**: Stack (20% + 20% = 40% total)
+
+  - **Option B**: Reset (new 20% starts, old expires)
+
+  - **Option C**: Cap (max 30% surcharge regardless of claims)
+
+ 
+
+**Recommendation:** Option B (reset) is most realistic. Second claim resets the 5-year clock.
+
+ 
+
+**Pass Criteria:**
+
+- Surcharge behavior matches chosen business rule
+
+- No calculation errors or infinite surcharges
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 2: Monte Carlo Randomization
+
+ 
+
+**Requirement:** MC runs will randomize insurance claim timing and severity.
+
+ 
+
+**Design Consideration:**
+
+- Current design: Events scheduled by year/month (deterministic)
+
+- Phase 2: Events have `"probability": 0.15` (15% annual hurricane chance)
+
+- MC engine samples event occurrence per run
+
+- No changes to claim processing logic needed
+
+ 
+
+**Action for Phase 1:**
+
+- Keep claim logic in dedicated `insurance.py` module
+
+- Ensure functions accept event parameters (not hardcoded values)
+
+- Document: "Phase 2: Events become probabilistic, claim logic unchanged"
+
+ 
+
+#### For Phase 3: Market Intelligence Integration
+
+ 
+
+**Requirement:** Pull live insurance quotes from APIs or manual entry.
+
+ 
+
+**Design Consideration:**
+
+- Add `"insurance_quotes"` section to config for per-property actual quotes
+
+- Override market defaults with actual quote data
+
+- Track quote expiration dates
+
+ 
+
+**Action for Phase 1:**
+
+- Use market-level defaults for now
+
+- In Phase 2, add optional per-unit overrides
+
+- Example:
+
+  ```json
+
+  {
+
+    "unit_overrides": [
+
+      {
+
+        "unit_id": 0,
+
+        "insurance_annual_premium": 3200.0,  // Actual quote
+
+        "quote_date": "2025-06-01",
+
+        "quote_expires": "2025-09-01"
+
+      }
+
+    ]
+
+  }
+
+  ```
+
+ 
+
+#### For Phase 6: Actual Performance Tracking
+
+ 
+
+**Requirement:** Track real insurance claims and premiums vs model.
+
+ 
+
+**Design Consideration:**
+
+- Output includes "Projected Insurance Premium" column
+
+- Phase 6 adds "Actual Insurance Premium" column (from bank statements)
+
+- Variance tracking: Actual vs Projected
+
+ 
+
+**Action for Phase 1:**
+
+- Ensure output columns are clearly named (e.g., "Insurance_Premium_Projected")
+
+- Leave room for "Insurance_Premium_Actual" in Phase 6
+
+ 
+
+---
+
+ 
+
+## 1.3 Event Modeling (Minor to Catastrophic)
+
+ 
+
+*(Continuing with detailed requirements for 1.3, 1.4, 1.5, 1.6, 1.7...)*
+
+ 
+
+**Note:** Due to length constraints, I'll continue writing the remaining sections (1.3-1.7) in this same document. The pattern established above will continue for each section with:
+
+- Functional Requirements
+
+- Data Model Changes
+
+- Calculation Logic
+
+- UI/Dashboard Requirements
+
+- Integration Points
+
+- Acceptance Criteria
+
+- Test Scenarios
+
+- Future-Proofing Guidance
+
+# STR Investment Platform - Phase 1 Requirements
+
+ 
+
+**Created:** December 28, 2025
+
+**Version:** 1.0
+
+**Target Version:** v2.4-PHASE-1
+
+**Current Baseline:** v2.3-PHOENIX-3BR-FAMILY-2025
+
+ 
+
+---
+
+ 
+
+## Executive Summary
+
+ 
+
+This document specifies detailed requirements for Phase 1 of the STR Investment Platform evolution. Phase 1 transforms the simulation engine from a theoretical model into a decision-ready tool by adding:
+
+ 
+
+1. **Revenue accuracy** through seasonality modeling
+
+2. **Expense realism** through coastal insurance dynamics
+
+3. **Risk understanding** through event modeling
+
+4. **Tax planning** through depreciation schedules
+
+5. **Maintenance planning** through CapEx tracking
+
+6. **Debt visibility** through enhanced financing dashboards
+
+7. **Exit planning** through liquidation scenarios
+
+ 
+
+**Timeline Context:** ~4 years before first purchase. Build comprehensively for confident decision-making.
+
+ 
+
+**Handoff Note for Implementation:** This requirements document is structured for implementation by a new Claude session. Each section includes:
+
+- Complete functional specifications
+
+- Exact data model changes with field names/types
+
+- Integration points with line number references to existing code
+
+- Future-proofing guidance to minimize Phase 2+ rework
+
+- Test scenarios with expected outcomes
+
+ 
+
+---
+
+ 
+
+## Requirements Summary Table
+
+ 
+
+| Item | Feature | Complexity | Dependencies | Estimated Effort | Priority |
+
+|------|---------|------------|--------------|------------------|----------|
+
+| **1.1** | Seasonality Engine & Market Profiles | **L** | None | 8-12 days | P0 (Highest) |
+
+| **1.2** | Insurance Modeling | **M** | 1.1 (market profiles), 1.3 (events) | 5-7 days | P0 (Highest) |
+
+| **1.3** | Event Modeling | **L** | 1.1 (seasonality), 1.2 (insurance) | 10-14 days | P0 (Highest) |
+
+| **1.4** | Tax Modeling | **M** | None | 4-6 days | P1 (High) |
+
+| **1.5** | CapEx Schedule | **M** | 1.3 (events) | 5-7 days | P1 (High) |
+
+| **1.6** | Enhanced Financing Dashboard | **S** | None | 2-4 days | P2 (Medium) |
+
+| **1.7** | Exit Strategy Modeling | **M** | 1.3 (events), 1.4 (tax for warnings) | 4-6 days | P2 (Medium) |
+
+ 
+
+**Total Estimated Effort:** 38-56 days
+
+ 
+
+**Recommended Implementation Order:**
+
+1. **Phase 1A** (parallel): 1.1 Seasonality, 1.4 Tax (independent)
+
+2. **Phase 1A** (after 1.1): 1.2 Insurance (depends on market profiles)
+
+3. **Phase 1B** (after 1.1, 1.2): 1.3 Events (integrates seasonality + insurance)
+
+4. **Phase 1B** (parallel with 1.3): 1.5 CapEx (can start after events schema defined)
+
+5. **Phase 1C** (any time): 1.6 Financing Dashboard (UI-only, independent)
+
+6. **Phase 1C** (after 1.3, 1.4): 1.7 Exit Strategy (needs event framework + tax warnings)
+
+ 
+
+---
+
+ 
+
+## Cross-Cutting Concerns
+
+ 
+
+### Backward Compatibility Strategy
+
+ 
+
+**Critical:** All Phase 1 features must be **backward compatible** with existing v2.3 configurations.
+
+ 
+
+**Implementation Pattern:**
+
+```python
+
+# Good: Graceful degradation
+
+market_profile = config.get("market_profiles", {}).get("orange_beach", None)
+
+if market_profile and market_profile.get("seasonality_enabled", False):
+
+    # Use seasonal multipliers
+
+    adr_multiplier = get_seasonal_multiplier(month, market_profile)
+
+else:
+
+    # Fall back to v2.3 behavior (flat rates)
+
+    adr_multiplier = 1.0
+
+```
+
+ 
+
+**Config Validation:**
+
+- Existing v2.3 configs must run without modification
+
+- New features opt-in via explicit config flags (e.g., `"seasonality_enabled": true`)
+
+- Validation framework (ob_str_engine/validation/checks.py) must warn on missing new fields but not error
+
+ 
+
+### Future-Proofing Principles
+
+ 
+
+1. **Market Profiles** (1.1): Design for multiple markets (OB, lake, generic) even though Phase 1 only implements OB
+
+2. **Event System** (1.3): Schema supports both scheduled and probabilistic events (Phase 2 Monte Carlo)
+
+3. **CapEx Tracking** (1.5): Track per-unit balances even though Phase 1 uses shared reserve
+
+4. **Per-Unit Data** (All): Extend `units` DataFrame, not just portfolio-level metrics
+
+5. **Tax Modeling** (1.4): Design for multi-state even though Phase 1 is single-state
+
+ 
+
+### Data Model Philosophy
+
+ 
+
+**Guiding Principle:** Extend, don't replace.
+
+ 
+
+- New config sections go in dedicated namespaces (e.g., `market_profiles`, `events`, `tax`)
+
+- Existing sections remain unchanged for compatibility
+
+- New output columns added to DataFrames (never remove existing columns)
+
+- Versioning: Add `"config_version": "2.4"` field to track schema evolution
+
+ 
+
+### Validation Framework Extension
+
+ 
+
+**Current:** 21 validation checks in `ob_str_engine/validation/checks.py`
+
+ 
+
+**Phase 1 Additions:** Each feature adds 2-5 new checks (estimated +20 total)
+
+ 
+
+**Categories:**
+
+1. **Config validation** - Ensure new fields are well-formed
+
+2. **Logic validation** - Verify calculations work correctly
+
+3. **Output validation** - Confirm results are reasonable
+
+4. **Compatibility validation** - Warn on deprecated patterns
+
+ 
+
+**Example New Check (1.1 Seasonality):**
+
+```python
+
+def validate_seasonality_multipliers(config: dict) -> ValidationResult:
+
+    """Verify monthly multipliers are reasonable (0.5-2.0 range)"""
+
+    # Implementation details in 1.1 spec
+
+```
+
+ 
+
+---
+
+ 
+
+## 1.1 Seasonality Engine & Market Profiles
+
+ 
+
+**Goal:** Model market-specific seasonal revenue patterns accurately, replacing flat 78% occupancy assumption with realistic monthly curves.
+
+ 
+
+**Complexity:** Large (L) - 8-12 days
+
+**Dependencies:** None
+
+**Priority:** P0 (Highest - foundation for revenue accuracy)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.1.1: Market Profile System
+
+**User Story:** As a portfolio planner, I need to define market-specific operating parameters so that multi-market portfolios can be accurately modeled.
+
+ 
+
+**System shall:**
+
+- Support multiple named market profiles (e.g., "orange_beach", "lake_generic", "custom_market_1")
+
+- Each market profile SHALL define:
+
+  - Base ADR and occupancy assumptions
+
+  - Monthly seasonality multipliers (12 values for ADR, 12 for occupancy)
+
+  - Market-specific expense patterns (insurance rates, property tax rates)
+
+  - Appreciation and inflation rates (overrides to global if specified)
+
+  - Human-readable display name and description
+
+- Provide a default "orange_beach" profile pre-configured with Jorge's assumptions
+
+- Provide a fallback "generic" profile (flat seasonality, national averages)
+
+ 
+
+#### FR-1.1.2: Seasonal Revenue Calculation
+
+**User Story:** As a simulation user, I need monthly revenue to reflect seasonal patterns so that cash flow projections are realistic.
+
+ 
+
+**System shall:**
+
+- Apply monthly multipliers to base ADR and occupancy for each unit
+
+- Calculate gross monthly revenue as: `ADR × ADR_multiplier × Occupancy × Occ_multiplier × Days × Units`
+
+- Handle partial months correctly (e.g., property purchased mid-month)
+
+- When property purchased mid-year, apply seasonality from the purchase month forward (Option A from questions)
+
+- Aggregate portfolio-level revenue across units in different markets
+
+ 
+
+#### FR-1.1.3: Parity Pricing Integration
+
+**User Story:** As an acquisition planner, I need parity price to use seasonal revenue averages so that properties are priced for consistent yield.
+
+ 
+
+**System shall:**
+
+- Calculate annual average revenue using seasonal multipliers: `sum(monthly_revenues) / 12`
+
+- Use seasonal average (not flat baseline) in parity price formula in `acquisition.py:calculate_parity_price()`
+
+- Maintain 6.5% unlevered yield target using seasonal NOI
+
+- Document the seasonal adjustment in output columns
+
+ 
+
+#### FR-1.1.4: Unit-to-Market Assignment
+
+**User Story:** As a portfolio manager, I need to assign each property to a market profile so that multi-market portfolios are supported.
+
+ 
+
+**System shall:**
+
+- Each unit assigned to exactly one market profile by name (string reference)
+
+- Assignment happens at acquisition time (stored in Unit dataclass)
+
+- Support portfolio-wide default market (applies to all units unless overridden)
+
+- Validate that referenced market profile exists in config
+
+ 
+
+#### FR-1.1.5: Seasonality Toggle
+
+**User Story:** As an analyst, I need to compare seasonal vs flat projections so that I can quantify the impact of seasonality.
+
+ 
+
+**System shall:**
+
+- Provide `"seasonality_enabled": true/false` flag per market profile
+
+- When false, multipliers default to 1.0 (flat revenue, v2.3 behavior)
+
+- Allow scenario comparison: same config with seasonality on vs off
+
+- Log warning if seasonality disabled in a market with defined curves
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+#### Config JSON Schema Extensions
+
+ 
+
+**New top-level section: `market_profiles`**
+
+ 
+
+```json
+
+{
+
+  "market_profiles": {
+
+    "orange_beach": {
+
+      "display_name": "Orange Beach, AL",
+
+      "description": "Gulf Coast 2BR condo STR market",
+
+      "seasonality_enabled": true,
+
+ 
+
+      "baseline": {
+
+        "adr": 425.0,
+
+        "occupancy": 0.78,
+
+        "notes": "Annual averages - actual monthly varies per curves below"
+
+      },
+
+ 
+
+      "seasonality": {
+
+        "adr_multipliers": [0.85, 0.85, 1.10, 1.10, 1.10, 1.35, 1.35, 1.35, 1.10, 1.10, 0.85, 0.85],
+
+        "occupancy_multipliers": [0.58, 0.58, 0.90, 0.90, 0.90, 1.15, 1.15, 1.15, 0.90, 0.90, 0.58, 0.58],
+
+        "notes": "Index 0 = January, 11 = December. Peak Jun-Aug, Shoulder Mar-May/Sep-Oct, Off-season Nov-Feb"
+
+      },
+
+ 
+
+      "expenses": {
+
+        "insurance_rate": 0.04,
+
+        "property_tax_rate": 0.0055,
+
+        "hoa_annual": 12800.0,
+
+        "notes": "Coastal insurance higher than generic; HOA typical for OB condos"
+
+      },
+
+ 
+
+      "market": {
+
+        "appreciation_rate": 0.03,
+
+        "revenue_inflation_rate": 0.04,
+
+        "notes": "Overrides global market settings if specified"
+
+      }
+
+    },
+
+ 
+
+    "generic": {
+
+      "display_name": "Generic Market (Flat Seasonality)",
+
+      "description": "Default market with no seasonal variation",
+
+      "seasonality_enabled": false,
+
+ 
+
+      "baseline": {
+
+        "adr": 200.0,
+
+        "occupancy": 0.70
+
+      },
+
+ 
+
+      "seasonality": {
+
+        "adr_multipliers": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+
+        "occupancy_multipliers": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+      },
+
+ 
+
+      "expenses": {
+
+        "insurance_rate": 0.033,
+
+        "property_tax_rate": 0.0055,
+
+        "hoa_annual": 8000.0
+
+      },
+
+ 
+
+      "market": {
+
+        "appreciation_rate": 0.03,
+
+        "revenue_inflation_rate": 0.04
+
+      }
+
+    }
+
+  },
+
+ 
+
+  "policies": {
+
+    "portfolio": {
+
+      "maxUnits": 7,
+
+      "stopRefiAtMaxUnits": true,
+
+      "default_market": "orange_beach"  // NEW: Portfolio-wide default
+
+    }
+
+  }
+
+}
+
+```
+
+ 
+
+**Derivation of Orange Beach Multipliers:**
+
+ 
+
+Based on provided assumptions:
+
+- Peak (Jun-Aug): Occupancy 90%, ADR +35%
+
+- Shoulder (Mar-May, Sep-Oct): Occupancy 70%, ADR +10%
+
+- Off-season (Nov-Feb): Occupancy 45%, ADR -15%
+
+ 
+
+**ADR Multipliers** (baseline $425):
+
+- Off-season: -15% → 0.85
+
+- Shoulder: +10% → 1.10
+
+- Peak: +35% → 1.35
+
+ 
+
+**Occupancy Multipliers** (baseline 78%):
+
+- Off-season: 45% / 78% = 0.58
+
+- Shoulder: 70% / 78% = 0.90
+
+- Peak: 90% / 78% = 1.15
+
+ 
+
+**Verification:** Annual average should remain ~78%:
+
+```
+
+(0.58×4 + 0.90×5 + 1.15×3) / 12 = (2.32 + 4.50 + 3.45) / 12 = 10.27 / 12 ≈ 0.856
+
+Actual occupancy: 78% × 0.856 ≈ 67% (lower than flat 78% - more realistic!)
+
+```
+
+ 
+
+**Important:** The provided assumptions yield an annual average occupancy of ~67%, not 78%. This is expected and more realistic. The baseline 78% should be interpreted as "peak season equivalent" not "annual average." Recommend updating `occupancyBaseline` in config to reflect true annual average once seasonality enabled.
+
+ 
+
+#### Unit Dataclass Extension (ob_str_engine/engine/types.py)
+
+ 
+
+```python
+
+@dataclass
+
+class Unit:
+
+    value: float
+
+    debt: float
+
+    monthly_payment: float
+
+    rate: float
+
+    last_refi_month: int
+
+    unit_id: int = 0
+
+    cash_invested: float = 0.0
+
+    purchase_month: int = 0
+
+ 
+
+    # NEW: Market profile assignment
+
+    market_profile: str = "orange_beach"  # Name reference to market_profiles config
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/types.py` (lines 10-20)
+
+- Action: Add `market_profile: str = "orange_beach"` field
+
+- **Backward compatibility:** Default value ensures existing code works
+
+- **Future-proofing:** Enables per-unit market override in Phase 2 (roadmap item)
+
+ 
+
+#### SimulationResult DataFrame Extensions
+
+ 
+
+**Monthly DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description | Example Value |
+
+|-------------|------|-------------|---------------|
+
+| `Seasonality_Enabled` | bool | Whether seasonality active this month | True |
+
+| `ADR_Base` | float | Pre-multiplier ADR for the year | $425.00 |
+
+| `ADR_Seasonal_Multiplier` | float | This month's ADR multiplier | 1.35 (June) |
+
+| `ADR_Effective` | float | Actual ADR used (base × multiplier × inflation) | $574.88 |
+
+| `Occupancy_Base` | float | Pre-multiplier occupancy | 0.78 |
+
+| `Occupancy_Seasonal_Multiplier` | float | This month's occupancy multiplier | 1.15 (June) |
+
+| `Occupancy_Effective` | float | Actual occupancy used | 0.897 (89.7%) |
+
+| `Revenue_Seasonal_Adjustment` | float | Delta from flat revenue | +$8,432 (peak season) |
+
+ 
+
+**Units DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `Unit_Market_Profile` | str | Market this unit belongs to |
+
+| `Unit_ADR_Effective` | float | This unit's ADR this month |
+
+| `Unit_Occupancy_Effective` | float | This unit's occupancy this month |
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/simulator.py` (lines 450-500, recording section)
+
+- Action: Add new columns to monthly DataFrame construction
+
+- **Backward compatibility:** New columns appended, existing columns unchanged
+
+- **Testing:** Verify CSV export includes new columns
+
+ 
+
+---
+
+ 
+
+### Calculation Logic & Formulas
+
+ 
+
+#### Monthly Revenue Calculation (Replaces Current Logic)
+
+ 
+
+**Current code location:** `ob_str_engine/engine/revenue.py:calculate_gross_revenue()`
+
+ 
+
+**Current logic (v2.3):**
+
+```python
+
+def calculate_gross_revenue(year, units_owned, config):
+
+    base_adr = config["constants"]["operations"]["adrBaseline2BR"]
+
+    occupancy = config["constants"]["operations"]["occupancyBaseline"]
+
+    inflation = config["market"]["revenueInflationRate"]
+
+ 
+
+    adr_this_year = base_adr * (1 + inflation) ** (year - 1)
+
+    gross_monthly = adr_this_year * occupancy * 30 * units_owned  # Flat
+
+    return gross_monthly
+
+```
+
+ 
+
+**New logic (v2.4 with seasonality):**
+
+```python
+
+def calculate_gross_revenue_seasonal(year, month, units, config):
+
+    """
+
+    Calculate gross revenue with seasonal adjustments per unit.
+
+ 
+
+    Args:
+
+        year: Simulation year (1-30)
+
+        month: Simulation month (1-360)
+
+        units: List[Unit] - all units owned this month
+
+        config: Configuration dict with market_profiles
+
+ 
+
+    Returns:
+
+        tuple: (gross_revenue, revenue_details_dict)
+
+    """
+
+    total_revenue = 0.0
+
+    details = {
+
+        "by_market": {},
+
+        "seasonal_adjustment": 0.0,  # vs flat baseline
+
+        "units_breakdown": []
+
+    }
+
+ 
+
+    calendar_month = ((month - 1) % 12) + 1  # 1-12 for Jan-Dec
+
+    days_in_month = get_days_in_month(calendar_month)
+
+ 
+
+    for unit in units:
+
+        # Get market profile for this unit
+
+        market_name = unit.market_profile
+
+        market = config["market_profiles"].get(market_name)
+
+ 
+
+        if not market:
+
+            raise ValueError(f"Unit {unit.unit_id} references unknown market: {market_name}")
+
+ 
+
+        # Base rates
+
+        base_adr = market["baseline"]["adr"]
+
+        base_occupancy = market["baseline"]["occupancy"]
+
+ 
+
+        # Apply revenue inflation (annual)
+
+        inflation_rate = market.get("market", {}).get("revenue_inflation_rate",
+
+                                                       config["market"]["revenueInflationRate"])
+
+        adr_inflated = base_adr * (1 + inflation_rate) ** (year - 1)
+
+ 
+
+        # Apply seasonal multipliers if enabled
+
+        if market.get("seasonality_enabled", False):
+
+            adr_mult = market["seasonality"]["adr_multipliers"][calendar_month - 1]
+
+            occ_mult = market["seasonality"]["occupancy_multipliers"][calendar_month - 1]
+
+        else:
+
+            adr_mult = 1.0
+
+            occ_mult = 1.0
+
+ 
+
+        # Effective rates
+
+        adr_effective = adr_inflated * adr_mult
+
+        occupancy_effective = base_occupancy * occ_mult
+
+ 
+
+        # Calculate revenue for this unit
+
+        unit_revenue = adr_effective * occupancy_effective * days_in_month
+
+        total_revenue += unit_revenue
+
+ 
+
+        # Track details
+
+        flat_revenue = adr_inflated * base_occupancy * days_in_month
+
+        seasonal_delta = unit_revenue - flat_revenue
+
+ 
+
+        details["units_breakdown"].append({
+
+            "unit_id": unit.unit_id,
+
+            "market": market_name,
+
+            "adr_base": base_adr,
+
+            "adr_inflated": adr_inflated,
+
+            "adr_multiplier": adr_mult,
+
+            "adr_effective": adr_effective,
+
+            "occupancy_base": base_occupancy,
+
+            "occupancy_multiplier": occ_mult,
+
+            "occupancy_effective": occupancy_effective,
+
+            "revenue": unit_revenue,
+
+            "seasonal_delta": seasonal_delta
+
+        })
+
+ 
+
+        # Aggregate by market
+
+        if market_name not in details["by_market"]:
+
+            details["by_market"][market_name] = {
+
+                "units": 0,
+
+                "revenue": 0.0,
+
+                "seasonal_delta": 0.0
+
+            }
+
+        details["by_market"][market_name]["units"] += 1
+
+        details["by_market"][market_name]["revenue"] += unit_revenue
+
+        details["by_market"][market_name]["seasonal_delta"] += seasonal_delta
+
+ 
+
+    # Total seasonal adjustment
+
+    details["seasonal_adjustment"] = sum(u["seasonal_delta"] for u in details["units_breakdown"])
+
+ 
+
+    return total_revenue, details
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/revenue.py`
+
+- Action: Add new function `calculate_gross_revenue_seasonal()`, keep old function for backward compatibility
+
+- File: `ob_str_engine/engine/simulator.py` (line ~150, income calculation)
+
+- Action: Replace call to `calculate_gross_revenue()` with seasonal version
+
+- **Testing:** Compare flat vs seasonal for same portfolio (seasonal should show variance)
+
+ 
+
+#### Parity Price Calculation (Updated for Seasonality)
+
+ 
+
+**Current code location:** `ob_str_engine/engine/acquisition.py:calculate_parity_price()`
+
+ 
+
+**Current logic (v2.3):**
+
+```python
+
+def calculate_parity_price(year, config):
+
+    """Calculate price for 6.5% unlevered yield using flat revenue."""
+
+    base_adr = config["constants"]["operations"]["adrBaseline2BR"]
+
+    occupancy = config["constants"]["operations"]["occupancyBaseline"]
+
+ 
+
+    # Annual inflation
+
+    inflation = config["market"]["revenueInflationRate"]
+
+    adr_this_year = base_adr * (1 + inflation) ** (year - 1)
+
+ 
+
+    # Annual gross revenue (flat)
+
+    gross_annual = adr_this_year * occupancy * 365
+
+ 
+
+    # NOI calculation
+
+    mgmt_pct = config["constants"]["operations"]["mgmtPct"]
+
+    capex_pct = config["constants"]["operations"]["capexPct"]
+
+    hoa_inflation = config["constants"]["operations"]["hoaInflationRate"]
+
+    hoa_base = config["constants"]["operations"]["hoaAnnual"]
+
+    hoa_this_year = hoa_base * (1 + hoa_inflation) ** (year - 1)
+
+ 
+
+    noi = gross_annual * (1 - mgmt_pct - capex_pct) - hoa_this_year
+
+ 
+
+    # Parity price for 6.5% yield
+
+    target_yield = config["constants"]["acquisition"]["targetYieldUnlevered"]
+
+    insurance_rate = config["constants"]["operations"]["insuranceRate"]
+
+    tax_rate = config["constants"]["operations"]["propertyTaxRate"]
+
+ 
+
+    price = noi / (target_yield + insurance_rate + tax_rate)
+
+    return price
+
+```
+
+ 
+
+**Updated logic (v2.4 with seasonality):**
+
+```python
+
+def calculate_parity_price(year, config, market_profile_name="orange_beach"):
+
+    """
+
+    Calculate price for 6.5% unlevered yield using seasonal average revenue.
+
+ 
+
+    Args:
+
+        year: Acquisition year (1-30)
+
+        config: Configuration dict
+
+        market_profile_name: Market to price for (default: portfolio default)
+
+ 
+
+    Returns:
+
+        float: Parity price for this market in this year
+
+    """
+
+    # Get market profile
+
+    if market_profile_name is None:
+
+        market_profile_name = config["policies"]["portfolio"].get("default_market", "orange_beach")
+
+ 
+
+    market = config["market_profiles"].get(market_profile_name)
+
+    if not market:
+
+        raise ValueError(f"Unknown market profile: {market_profile_name}")
+
+ 
+
+    # Base rates
+
+    base_adr = market["baseline"]["adr"]
+
+    base_occupancy = market["baseline"]["occupancy"]
+
+ 
+
+    # Apply annual inflation
+
+    inflation = market.get("market", {}).get("revenue_inflation_rate",
+
+                                              config["market"]["revenueInflationRate"])
+
+    adr_this_year = base_adr * (1 + inflation) ** (year - 1)
+
+ 
+
+    # Calculate SEASONAL AVERAGE annual revenue
+
+    if market.get("seasonality_enabled", False):
+
+        monthly_revenues = []
+
+        adr_mults = market["seasonality"]["adr_multipliers"]
+
+        occ_mults = market["seasonality"]["occupancy_multipliers"]
+
+ 
+
+        for month_idx in range(12):
+
+            adr_effective = adr_this_year * adr_mults[month_idx]
+
+            occ_effective = base_occupancy * occ_mults[month_idx]
+
+            days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month_idx]  # Ignore leap years for simplicity
+
+            monthly_revenue = adr_effective * occ_effective * days
+
+            monthly_revenues.append(monthly_revenue)
+
+ 
+
+        gross_annual = sum(monthly_revenues)
+
+    else:
+
+        # Flat calculation (v2.3 behavior)
+
+        gross_annual = adr_this_year * base_occupancy * 365
+
+ 
+
+    # NOI calculation (same as v2.3)
+
+    mgmt_pct = config["constants"]["operations"]["mgmtPct"]
+
+    capex_pct = config["constants"]["operations"]["capexPct"]
+
+    hoa_inflation = config["constants"]["operations"]["hoaInflationRate"]
+
+    hoa_base = market["expenses"].get("hoa_annual",
+
+                                       config["constants"]["operations"]["hoaAnnual"])
+
+    hoa_this_year = hoa_base * (1 + hoa_inflation) ** (year - 1)
+
+ 
+
+    noi = gross_annual * (1 - mgmt_pct - capex_pct) - hoa_this_year
+
+ 
+
+    # Parity price for 6.5% yield
+
+    target_yield = config["constants"]["acquisition"]["targetYieldUnlevered"]
+
+    insurance_rate = market["expenses"].get("insurance_rate",
+
+                                             config["constants"]["operations"]["insuranceRate"])
+
+    tax_rate = market["expenses"].get("property_tax_rate",
+
+                                       config["constants"]["operations"]["propertyTaxRate"])
+
+ 
+
+    price = noi / (target_yield + insurance_rate + tax_rate)
+
+ 
+
+    return price
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/engine/acquisition.py` (lines 50-80)
+
+- Action: Replace function with seasonal-aware version
+
+- **Critical:** Parity price will CHANGE with seasonality enabled. For OB market with provided multipliers:
+
+  - Flat annual revenue: $425 × 0.78 × 365 = $121,278
+
+  - Seasonal annual revenue: ~$108,000 (estimated, will vary)
+
+  - **Parity price will be LOWER with seasonality** (more realistic)
+
+- **Testing:** Compare parity prices with/without seasonality (expect ~10-15% reduction)
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### New Dashboard Page: "Market Profiles & Seasonality"
+
+ 
+
+**Location:** Create `ui/pages/8_market_profiles.py`
+
+ 
+
+**Purpose:** Configure and visualize market profiles and seasonal patterns.
+
+ 
+
+**Sections:**
+
+ 
+
+1. **Market Profile Selector**
+
+   - Dropdown: Select market to view/edit
+
+   - Button: "Add New Market Profile"
+
+   - Button: "Clone from Existing"
+
+ 
+
+2. **Market Configuration Form**
+
+   - Display name (text input)
+
+   - Description (text area)
+
+   - Seasonality enabled toggle
+
+   - Baseline ADR (number input)
+
+   - Baseline Occupancy (slider, 0-100%)
+
+   - HOA Annual (number input)
+
+   - Insurance rate (percentage input)
+
+   - Property tax rate (percentage input)
+
+ 
+
+3. **Seasonality Curve Editor**
+
+   - Interactive chart showing 12-month curves:
+
+     - ADR multipliers (bar chart)
+
+     - Occupancy multipliers (bar chart)
+
+     - Combined effect on revenue (line chart)
+
+   - Table: Edit multipliers by month (12 rows × 2 columns)
+
+   - Button: "Reset to Defaults" (revert to flat 1.0)
+
+   - Button: "Load OB Template" (apply Jorge's assumptions)
+
+ 
+
+4. **Revenue Impact Visualization**
+
+   - Chart: Monthly revenue comparison (flat vs seasonal) for a single unit
+
+   - Metrics:
+
+     - Annual revenue (flat): $XXX,XXX
+
+     - Annual revenue (seasonal): $XXX,XXX
+
+     - Difference: +/- $XX,XXX (+/-X%)
+
+   - Peak month revenue vs off-season (highlight variance)
+
+ 
+
+5. **Parity Price Impact**
+
+   - Table: Parity price by year (1, 5, 10, 15, 20, 25, 30) with/without seasonality
+
+   - Chart: Parity price over time (line chart, two lines)
+
+   - Callout: "Seasonality reduces parity price by ~$XX,XXX (X%) in Year 1"
+
+ 
+
+**Implementation Notes:**
+
+- Reuse existing UI patterns from `ui/pages/1_run_control.py` (config editing)
+
+- Use Plotly for interactive charts (consistent with existing pages)
+
+- Live preview: Changes to multipliers update charts immediately
+
+- Save button: Update config and re-run simulation (if desired)
+
+ 
+
+#### Enhancements to Existing Pages
+
+ 
+
+**Page 1: Run Control & Config (`ui/pages/1_run_control.py`)**
+
+ 
+
+Add to KPI cards section:
+
+- **Seasonality Status**: "Enabled (2 markets)" or "Disabled"
+
+- **Effective Occupancy**: "67% avg (seasonal)" vs "78% (flat)"
+
+ 
+
+Add to Portfolio Value chart:
+
+- Optional overlay: Flat projection (dashed line) for comparison
+
+ 
+
+**Page 4: Time Series Analysis (`ui/pages/4_time_series.py`)**
+
+ 
+
+Add new metric options to selector:
+
+- "ADR Effective (Seasonal)" - line chart showing monthly ADR variance
+
+- "Occupancy Effective (Seasonal)" - line chart showing monthly occupancy
+
+- "Revenue Seasonal Adjustment" - bar chart showing monthly delta vs flat
+
+ 
+
+Add filter: "Show seasonal variance only" (hides flat months)
+
+ 
+
+**Page 5: Unit Comparison (`ui/pages/5_unit_comparison.py`)**
+
+ 
+
+Add to unit comparison table:
+
+- Column: "Market Profile"
+
+- Column: "Avg Seasonal Adjustment" (+/-X% vs flat)
+
+ 
+
+Add chart: "Unit Revenue by Month" showing seasonality curves per unit
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+#### 1. Main Simulation Loop (simulator.py)
+
+ 
+
+**File:** `ob_str_engine/engine/simulator.py`
+
+**Function:** `simulate()`
+
+**Current line:** ~150 (income calculation in monthly loop)
+
+ 
+
+**Current code:**
+
+```python
+
+# Month: Income
+
+gross_monthly = revenue.calculate_gross_revenue(year, units_owned, cfg)
+
+external_savings = cfg["constants"]["financial"]["annualSavings"] / 12.0
+
+operating_cash += gross_monthly + external_savings
+
+```
+
+ 
+
+**Updated code:**
+
+```python
+
+# Month: Income (with seasonality)
+
+if cfg.get("market_profiles"):
+
+    # v2.4: Seasonal revenue per unit
+
+    gross_monthly, revenue_details = revenue.calculate_gross_revenue_seasonal(
+
+        year, month, units, cfg
+
+    )
+
+    # Store details for output
+
+    monthly_revenue_breakdown = revenue_details
+
+else:
+
+    # v2.3 fallback: Flat revenue
+
+    gross_monthly = revenue.calculate_gross_revenue(year, units_owned, cfg)
+
+    monthly_revenue_breakdown = None
+
+ 
+
+external_savings = cfg["constants"]["financial"]["annualSavings"] / 12.0
+
+operating_cash += gross_monthly + external_savings
+
+```
+
+ 
+
+**Impact:** Revenue calculation now unit-aware and market-aware.
+
+ 
+
+#### 2. Acquisition Logic (acquisition.py)
+
+ 
+
+**File:** `ob_str_engine/engine/acquisition.py`
+
+**Function:** `attempt_purchase()`
+
+**Current line:** ~120 (parity price calculation)
+
+ 
+
+**Current code:**
+
+```python
+
+price_parity = calculate_parity_price(year, cfg)
+
+```
+
+ 
+
+**Updated code:**
+
+```python
+
+# Get default market for new purchases
+
+default_market = cfg["policies"]["portfolio"].get("default_market", "orange_beach")
+
+price_parity = calculate_parity_price(year, cfg, market_profile_name=default_market)
+
+ 
+
+# When creating new unit, assign market
+
+new_unit = Unit(
+
+    value=price_parity,
+
+    debt=debt,
+
+    monthly_payment=payment,
+
+    rate=rate,
+
+    last_refi_month=month,
+
+    unit_id=len(units),
+
+    cash_invested=down_payment + closing_costs,
+
+    purchase_month=month,
+
+    market_profile=default_market  # NEW
+
+)
+
+```
+
+ 
+
+**Impact:** New properties automatically assigned to default market.
+
+ 
+
+#### 3. Unit Creation (types.py)
+
+ 
+
+**File:** `ob_str_engine/engine/types.py`
+
+**Dataclass:** `Unit`
+
+**Current line:** ~10
+
+ 
+
+**Action:** Add `market_profile: str = "orange_beach"` field (already specified in Data Model section).
+
+ 
+
+**Impact:** All unit objects now track their market assignment.
+
+ 
+
+#### 4. Validation Framework (validation/checks.py)
+
+ 
+
+**File:** `ob_str_engine/validation/checks.py`
+
+**Current:** 21 validation functions
+
+ 
+
+**New validations to add:**
+
+ 
+
+```python
+
+def validate_market_profiles_exist(config: dict) -> ValidationResult:
+
+    """Ensure market_profiles section is well-formed."""
+
+    if "market_profiles" not in config:
+
+        return ValidationResult(
+
+            check_name="market_profiles_exist",
+
+            status="warning",
+
+            message="No market_profiles defined; falling back to v2.3 flat revenue",
+
+            details={}
+
+        )
+
+ 
+
+    profiles = config["market_profiles"]
+
+    if not profiles or len(profiles) == 0:
+
+        return ValidationResult(
+
+            check_name="market_profiles_exist",
+
+            status="error",
+
+            message="market_profiles section is empty",
+
+            details={}
+
+        )
+
+ 
+
+    return ValidationResult(
+
+        check_name="market_profiles_exist",
+
+        status="pass",
+
+        message=f"Found {len(profiles)} market profiles",
+
+        details={"profiles": list(profiles.keys())}
+
+    )
+
+ 
+
+ 
+
+def validate_seasonality_multipliers(config: dict) -> ValidationResult:
+
+    """Verify monthly multipliers are reasonable (0.3-3.0 range)."""
+
+    if "market_profiles" not in config:
+
+        return ValidationResult(
+
+            check_name="seasonality_multipliers",
+
+            status="skip",
+
+            message="No market profiles to validate",
+
+            details={}
+
+        )
+
+ 
+
+    issues = []
+
+    for market_name, market in config["market_profiles"].items():
+
+        if not market.get("seasonality_enabled", False):
+
+            continue
+
+ 
+
+        seasonality = market.get("seasonality", {})
+
+        adr_mults = seasonality.get("adr_multipliers", [])
+
+        occ_mults = seasonality.get("occupancy_multipliers", [])
+
+ 
+
+        # Check length
+
+        if len(adr_mults) != 12:
+
+            issues.append(f"{market_name}: adr_multipliers has {len(adr_mults)} values, need 12")
+
+        if len(occ_mults) != 12:
+
+            issues.append(f"{market_name}: occupancy_multipliers has {len(occ_mults)} values, need 12")
+
+ 
+
+        # Check range
+
+        for idx, mult in enumerate(adr_mults):
+
+            if mult < 0.3 or mult > 3.0:
+
+                issues.append(f"{market_name}: adr_multipliers[{idx}] = {mult} (out of range 0.3-3.0)")
+
+ 
+
+        for idx, mult in enumerate(occ_mults):
+
+            if mult < 0.3 or mult > 3.0:
+
+                issues.append(f"{market_name}: occupancy_multipliers[{idx}] = {mult} (out of range 0.3-3.0)")
+
+ 
+
+    if issues:
+
+        return ValidationResult(
+
+            check_name="seasonality_multipliers",
+
+            status="error",
+
+            message=f"Found {len(issues)} issues with seasonal multipliers",
+
+            details={"issues": issues}
+
+        )
+
+ 
+
+    return ValidationResult(
+
+        check_name="seasonality_multipliers",
+
+        status="pass",
+
+        message="All seasonal multipliers in valid range",
+
+        details={}
+
+    )
+
+ 
+
+ 
+
+def validate_market_references(config: dict, result: SimulationResult) -> ValidationResult:
+
+    """Ensure all units reference valid market profiles."""
+
+    if "market_profiles" not in config:
+
+        return ValidationResult(
+
+            check_name="market_references",
+
+            status="skip",
+
+            message="No market profiles to validate",
+
+            details={}
+
+        )
+
+ 
+
+    defined_markets = set(config["market_profiles"].keys())
+
+ 
+
+    # Extract unique markets from units DataFrame
+
+    if not result.units.empty:
+
+        referenced_markets = set(result.units["Unit_Market_Profile"].unique())
+
+ 
+
+        invalid = referenced_markets - defined_markets
+
+        if invalid:
+
+            return ValidationResult(
+
+                check_name="market_references",
+
+                status="error",
+
+                message=f"Units reference undefined markets: {invalid}",
+
+                details={"invalid_markets": list(invalid)}
+
+            )
+
+ 
+
+    return ValidationResult(
+
+        check_name="market_references",
+
+        status="pass",
+
+        message="All market references valid",
+
+        details={}
+
+    )
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: `ob_str_engine/validation/checks.py` (append to end)
+
+- File: `ob_str_engine/validation/__init__.py` (add to `ALL_CHECKS` list)
+
+- **Testing:** Run validation suite on sample configs (valid, invalid, missing fields)
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.1.1: Market Profile Configuration**
+
+- [ ] Config JSON loads successfully with `market_profiles` section
+
+- [ ] Default "orange_beach" profile present with Jorge's assumptions
+
+- [ ] "generic" fallback profile present
+
+- [ ] Config validation passes for well-formed profiles
+
+- [ ] Config validation fails gracefully for malformed profiles (bad multipliers, missing fields)
+
+ 
+
+**AC-1.1.2: Seasonal Revenue Calculation**
+
+- [ ] Monthly revenue varies by month for Orange Beach market (peak > shoulder > off-season)
+
+- [ ] Annual sum of seasonal revenue matches expected average (within 1%)
+
+- [ ] Flat revenue (seasonality disabled) matches v2.3 baseline exactly
+
+- [ ] Scenario comparison shows measurable difference (seasonal vs flat)
+
+ 
+
+**AC-1.1.3: Parity Price Integration**
+
+- [ ] Parity price with seasonality enabled is 10-15% lower than flat (for OB market)
+
+- [ ] Parity price with seasonality disabled matches v2.3 exactly
+
+- [ ] Parity price increases with inflation over 30 years as expected
+
+ 
+
+**AC-1.1.4: Backward Compatibility**
+
+- [ ] Existing v2.3 config (without market_profiles) runs without errors
+
+- [ ] Revenue calculation falls back to flat when market_profiles missing
+
+- [ ] All existing validation checks still pass
+
+ 
+
+**AC-1.1.5: Output Data Integrity**
+
+- [ ] New columns appear in monthly DataFrame (Seasonality_Enabled, ADR_Effective, etc.)
+
+- [ ] CSV export includes new columns
+
+- [ ] Units DataFrame includes market profile column
+
+- [ ] No regression in existing columns (all 70+ columns still present and correct)
+
+ 
+
+**AC-1.1.6: UI Functionality**
+
+- [ ] New "Market Profiles" page accessible from sidebar
+
+- [ ] Can edit ADR/occupancy multipliers and see live chart update
+
+- [ ] Parity price impact visualization shows expected delta
+
+- [ ] Existing pages (Run Control, Time Series) show seasonal metrics
+
+- [ ] No UI errors or broken charts
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: Flat vs Seasonal Revenue Comparison
+
+ 
+
+**Setup:**
+
+- Run simulation with seasonality disabled (multipliers = 1.0)
+
+- Run identical simulation with seasonality enabled (OB profile)
+
+- Compare outputs
+
+ 
+
+**Expected Results:**
+
+- Flat: Monthly revenue constant (accounting for inflation)
+
+- Seasonal: Revenue varies by month (low in Feb, high in Jul)
+
+- Annual revenue (seasonal) is 10-20% lower than flat (more realistic)
+
+- All other logic (debt, reserves, etc.) works correctly with variable revenue
+
+ 
+
+**Pass Criteria:**
+
+- Seasonal revenue shows expected variance (peak > shoulder > off-season)
+
+- Simulation completes without errors for both scenarios
+
+- Cash flow remains positive (or negative months are expected/handled)
+
+ 
+
+#### Test 2: Parity Price Accuracy
+
+ 
+
+**Setup:**
+
+- Calculate parity price for Year 1, OB market, seasonality enabled
+
+- Manually verify calculation using seasonal average revenue
+
+ 
+
+**Manual Calculation:**
+
+```
+
+Base ADR: $425
+
+Inflation Year 1: 0% (year 1)
+
+Monthly revenues:
+
+  Jan: $425 × 0.85 × 0.78 × 0.58 × 31 = $5,979
+
+  Feb: $425 × 0.85 × 0.78 × 0.58 × 28 = $5,401
+
+  ... (calculate all 12 months)
+
+Annual gross: Sum(monthly) ≈ $108,500 (estimate)
+
+ 
+
+NOI: $108,500 × (1 - 0.2 - 0.1) - $12,800 = $75,950 - $12,800 = $63,150
+
+ 
+
+Parity: $63,150 / (0.065 + 0.04 + 0.0055) = $63,150 / 0.1105 = $571,493
+
+```
+
+ 
+
+**Expected Results:**
+
+- Parity price from model matches manual calculation (within $100)
+
+- Parity price is ~30% lower than v2.3 flat assumption (~$822k)
+
+ 
+
+**Pass Criteria:**
+
+- Parity price calculation matches manual (within 0.1%)
+
+- Price is reasonable for OB market (~$550k-$600k for Year 1)
+
+ 
+
+#### Test 3: Multi-Market Portfolio (Future-Proofing)
+
+ 
+
+**Setup:**
+
+- Create config with 2 markets: "orange_beach" and "lake_generic"
+
+- Assign units manually to different markets in code (simulate mixed portfolio)
+
+- Run simulation
+
+ 
+
+**Expected Results:**
+
+- Revenue aggregates correctly across markets
+
+- Each unit uses its assigned market's parameters
+
+- Output DataFrame shows correct market assignment per unit
+
+- No calculation errors or inconsistencies
+
+ 
+
+**Pass Criteria:**
+
+- Portfolio revenue = sum of per-unit revenues (exact match)
+
+- Units DataFrame shows correct market_profile per unit
+
+- Simulation completes successfully
+
+ 
+
+#### Test 4: Edge Cases
+
+ 
+
+**Test 4a: Property Purchased Mid-Year (March)**
+
+- Purchase property in Month 3 (March)
+
+- Verify March revenue uses March multiplier (shoulder season)
+
+- Verify partial month calculation is correct
+
+ 
+
+**Test 4b: Leap Year Handling**
+
+- Run 30-year simulation (includes 7-8 leap years)
+
+- Verify February revenue calculation handles 28 vs 29 days
+
+- Verify annual totals are consistent
+
+ 
+
+**Test 4c: Extreme Multipliers**
+
+- Set ADR multiplier to 3.0 (300% of baseline)
+
+- Set occupancy multiplier to 0.1 (10% of baseline)
+
+- Verify revenue calculation doesn't break
+
+- Verify validation catches if outside 0.3-3.0 range
+
+ 
+
+**Pass Criteria:**
+
+- All edge cases handled gracefully (no crashes)
+
+- Revenue calculations mathematically correct
+
+- Validation warnings/errors appear as expected
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 2: Monte Carlo Integration
+
+ 
+
+**Requirement:** Phase 2.1 will randomize seasonality multipliers across MC runs.
+
+ 
+
+**Design Consideration:**
+
+- Store multipliers as lists (already done) not hardcoded constants
+
+- Add optional `variance` parameter to each multiplier (e.g., `"adr_multipliers_variance": [0.05, 0.05, ...]`)
+
+- Monte Carlo engine can apply `multiplier × (1 + random.normal(0, variance))` per run
+
+- No changes to core calculation logic needed
+
+ 
+
+**Action for Phase 1 Implementation:**
+
+- Keep multiplier arrays simple (12 floats) for now
+
+- Document in code comments: "Phase 2: Add variance parameter for MC"
+
+- Ensure calculation functions accept multipliers as parameters (not hardcoded)
+
+ 
+
+#### For Phase 2: Per-Unit Seasonality Overrides
+
+ 
+
+**Requirement:** Roadmap Phase 2 mentions per-unit seasonality (beachfront premium, etc.)
+
+ 
+
+**Design Consideration:**
+
+- Unit dataclass already has `market_profile` field
+
+- Could extend to: `market_profile: str` OR `seasonality_override: dict`
+
+- Override would merge with market defaults (e.g., beachfront unit gets +10% ADR multiplier)
+
+ 
+
+**Action for Phase 1 Implementation:**
+
+- Use `market_profile` string reference (simple)
+
+- In Phase 2, add `unit_seasonality_adjustments` field (optional dict)
+
+- Calculation logic already loops per-unit, so override logic is easy to add
+
+ 
+
+#### For Phase 3: Market Intelligence Integration
+
+ 
+
+**Requirement:** Phase 3.2 will pull live AirDNA data to update seasonality curves.
+
+ 
+
+**Design Consideration:**
+
+- Seasonality curves stored as config (editable) not hardcoded
+
+- Add `"last_updated": "2025-12-28"` field to track data freshness
+
+- Add `"data_source": "manual"` field (future: "airdna", "internal", etc.)
+
+- UI should warn if data is >6 months old
+
+ 
+
+**Action for Phase 1 Implementation:**
+
+- Add metadata fields to market_profiles (optional, not required)
+
+- Design schema to be extensible (allow extra fields without breaking)
+
+- Example:
+
+  ```json
+
+  {
+
+    "seasonality": {
+
+      "adr_multipliers": [...],
+
+      "occupancy_multipliers": [...],
+
+      "metadata": {
+
+        "last_updated": "2025-12-28",
+
+        "data_source": "manual",
+
+        "notes": "Based on Jorge's assumptions"
+
+      }
+
+    }
+
+  }
+
+  ```
+
+ 
+
+---
+
+ 
+
+## 1.2 Insurance Modeling (Coastal-Specific)
+
+ 
+
+**Goal:** Accurately model coastal insurance costs and claim dynamics, replacing flat 3.3% assumption with market-specific rates, named storm deductibles, and claim scenarios.
+
+ 
+
+**Complexity:** Medium (M) - 5-7 days
+
+**Dependencies:** 1.1 (market profiles for base rates), 1.3 (events for hurricane claims)
+
+**Priority:** P0 (Highest - critical expense accuracy)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.2.1: Market-Specific Insurance Rates
+
+**User Story:** As a portfolio planner, I need different insurance rates per market so that coastal vs inland properties are priced correctly.
+
+ 
+
+**System shall:**
+
+- Store base insurance rate in market profile (already in 1.1 schema: `"insurance_rate": 0.04`)
+
+- Apply market-specific rate to each unit based on its assigned market
+
+- Support annual insurance inflation per market (default: 7% for coastal, 3% for inland)
+
+- Override global insurance rate when market profile specifies one
+
+ 
+
+#### FR-1.2.2: Named Storm Deductibles
+
+**User Story:** As a risk planner, I need to model hurricane deductibles so that I understand out-of-pocket exposure during catastrophic events.
+
+ 
+
+**System shall:**
+
+- Define named storm deductible as percentage of property value (e.g., 2%)
+
+- Calculate deductible at time of claim (based on current property value, not purchase price)
+
+- Apply deductible BEFORE insurance payout (owner pays deductible out of reserves)
+
+- Track cumulative deductibles paid over simulation (output metric)
+
+ 
+
+#### FR-1.2.3: Flood Insurance (Optional Coverage)
+
+**User Story:** As a coastal property owner, I need to model flood insurance costs for properties in flood zones.
+
+ 
+
+**System shall:**
+
+- Support per-unit flood zone flag (`in_flood_zone: true/false`)
+
+- If in flood zone, add annual flood insurance premium (fixed cost, e.g., $2,500/year)
+
+- Flood premium inflates independently (use general inflation rate or override)
+
+- Flood claims handled separately from named storm (different deductible structure)
+
+ 
+
+#### FR-1.2.4: Insurance Claim Dynamics (Event-Driven)
+
+**User Story:** As a scenario planner, I need to model insurance claims so that I understand cash flow during recovery.
+
+ 
+
+**System shall:**
+
+- Insurance claims triggered by events (defined in 1.3 Event Modeling)
+
+- Event specifies:
+
+  - Repair cost (gross cost before insurance)
+
+  - Insurance coverage percentage (e.g., 90% of costs covered)
+
+  - Deductible percentage (e.g., 2% named storm)
+
+  - Payout delay in months (e.g., 4-6 months typical for hurricanes)
+
+- Owner pays deductible + uncovered costs immediately (draws from reserves)
+
+- Insurance payout arrives X months later (adds to operating cash)
+
+- Track insurance claim status in output (pending, paid, amount)
+
+ 
+
+#### FR-1.2.5: Premium Increases After Claims
+
+**User Story:** As a long-term planner, I need to model insurance rate hikes after claims so that I understand multi-year cost impacts.
+
+ 
+
+**System shall:**
+
+- After a claim, increase insurance premium for affected property by X% (e.g., 15-30%)
+
+- Premium increase persists for Y years (e.g., 3-5 years)
+
+- If market-wide event (hurricane affects all units), increase applies to all units in that market
+
+- Track "surcharge" separately from base rate (for visualization/reporting)
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+#### Config JSON Schema Extensions
+
+ 
+
+**Extend `market_profiles` (from 1.1):**
+
+ 
+
+```json
+
+{
+
+  "market_profiles": {
+
+    "orange_beach": {
+
+      "display_name": "Orange Beach, AL",
+
+ 
+
+      "expenses": {
+
+        "insurance_rate": 0.04,  // 4% of property value (higher than generic 3.3%)
+
+        "property_tax_rate": 0.0055,
+
+        "hoa_annual": 12800.0,
+
+ 
+
+        // NEW: Insurance modeling details
+
+        "insurance": {
+
+          "base_rate": 0.04,
+
+          "inflation_rate": 0.07,  // 7% annual increase (coastal typical)
+
+          "named_storm_deductible_pct": 0.02,  // 2% of property value
+
+          "flood_zone_premium": 2500.0,  // Annual cost if in flood zone
+
+          "flood_zone_inflation_rate": 0.04,
+
+          "claim_surcharge": {
+
+            "increase_pct": 0.20,  // 20% increase after claim
+
+            "duration_years": 5    // Surcharge lasts 5 years
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+
+}
+
+```
+
+ 
+
+**Add per-unit flood zone flag:**
+
+ 
+
+Extend `Unit` dataclass (ob_str_engine/engine/types.py):
+
+ 
+
+```python
+
+@dataclass
+
+class Unit:
+
+    value: float
+
+    debt: float
+
+    monthly_payment: float
+
+    rate: float
+
+    last_refi_month: int
+
+    unit_id: int = 0
+
+    cash_invested: float = 0.0
+
+    purchase_month: int = 0
+
+    market_profile: str = "orange_beach"
+
+ 
+
+    # NEW: Insurance-specific fields
+
+    in_flood_zone: bool = False  # Whether this unit requires flood insurance
+
+    insurance_surcharge_until_month: int = 0  # Month when surcharge expires (0 = no surcharge)
+
+    insurance_surcharge_pct: float = 0.0  # Current surcharge percentage
+
+```
+
+ 
+
+**Event schema extension (see 1.3 for full event spec):**
+
+ 
+
+```json
+
+{
+
+  "events": [
+
+    {
+
+      "name": "Hurricane Sally",
+
+      "year": 3,
+
+      "month": 9,
+
+      "type": "catastrophic",
+
+      "scope": "portfolio",  // or "unit" with unit_id
+
+ 
+
+      "impacts": {
+
+        "repair_cost": 50000
+
+      },
+
+ 
+
+      // NEW: Insurance claim details
+
+      "insurance_claim": {
+
+        "coverage_pct": 0.90,  // Insurance covers 90%
+
+        "deductible_pct": 0.02,  // 2% named storm deductible
+
+        "payout_delay_months": 4,
+
+        "triggers_surcharge": true  // Apply rate increase after claim
+
+      }
+
+    }
+
+  ]
+
+}
+
+```
+
+ 
+
+#### SimulationResult DataFrame Extensions
+
+ 
+
+**Monthly DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description | Example |
+
+|-------------|------|-------------|---------|
+
+| `Insurance_Premium_Base` | float | Portfolio base insurance (before surcharges) | $1,800/mo |
+
+| `Insurance_Surcharge` | float | Additional premium from past claims | $360/mo (20% of base) |
+
+| `Insurance_Premium_Total` | float | Total insurance paid this month | $2,160/mo |
+
+| `Flood_Insurance_Premium` | float | Flood insurance costs (units in flood zones) | $208/mo ($2,500/yr) |
+
+| `Insurance_Claim_Pending_Amount` | float | Insurance payout expected (not yet received) | $45,000 |
+
+| `Insurance_Claim_Received` | float | Insurance payout received this month | $0 (or $45,000) |
+
+| `Cumulative_Deductibles_Paid` | float | Total deductibles paid to date | $16,000 |
+
+| `Cumulative_Insurance_Received` | float | Total insurance payouts received | $90,000 |
+
+ 
+
+**Units DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `Unit_In_Flood_Zone` | bool | Whether unit requires flood insurance |
+
+| `Unit_Insurance_Base_Rate` | float | Current base insurance rate (market default) |
+
+| `Unit_Insurance_Surcharge_Pct` | float | Current surcharge percentage |
+
+| `Unit_Insurance_Surcharge_Until_Month` | int | Month when surcharge expires |
+
+| `Unit_Insurance_Premium` | float | Total insurance this month (base + surcharge + flood) |
+
+| `Unit_Deductibles_Paid` | float | Cumulative deductibles paid for this unit |
+
+ 
+
+---
+
+ 
+
+### Calculation Logic & Formulas
+
+ 
+
+#### Monthly Insurance Premium Calculation
+
+ 
+
+**Current code location:** `ob_str_engine/engine/simulator.py` line ~180 (expense calculation)
+
+ 
+
+**Current logic (v2.3):**
+
+```python
+
+# Operating expenses
+
+insurance = total_portfolio_value * insurance_rate / 12.0
+
+```
+
+ 
+
+**New logic (v2.4):**
+
+ 
+
+```python
+
+def calculate_insurance_premium(year, month, units, config):
+
+    """
+
+    Calculate monthly insurance premium with market-specific rates,
+
+    flood insurance, and surcharges.
+
+ 
+
+    Args:
+
+        year: Simulation year (1-30)
+
+        month: Simulation month (1-360)
+
+        units: List[Unit] - all units owned
+
+        config: Configuration dict
+
+ 
+
+    Returns:
+
+        dict: {
+
+            "base_premium": float,
+
+            "surcharge": float,
+
+            "flood_premium": float,
+
+            "total_premium": float,
+
+            "by_unit": list of dicts
+
+        }
+
+    """
+
+    total_base = 0.0
+
+    total_surcharge = 0.0
+
+    total_flood = 0.0
+
+    by_unit = []
+
+ 
+
+    for unit in units:
+
+        # Get market insurance config
+
+        market = config["market_profiles"].get(unit.market_profile)
+
+        ins_config = market["expenses"].get("insurance", {})
+
+ 
+
+        # Base rate with inflation
+
+        base_rate = ins_config.get("base_rate", 0.04)
+
+        inflation_rate = ins_config.get("inflation_rate", 0.07)
+
+        inflated_rate = base_rate * (1 + inflation_rate) ** (year - 1)
+
+ 
+
+        # Base premium for this unit
+
+        base_premium_annual = unit.value * inflated_rate
+
+        base_premium_monthly = base_premium_annual / 12.0
+
+        total_base += base_premium_monthly
+
+ 
+
+        # Surcharge (if active)
+
+        surcharge_monthly = 0.0
+
+        if unit.insurance_surcharge_until_month > 0 and month <= unit.insurance_surcharge_until_month:
+
+            surcharge_monthly = base_premium_monthly * unit.insurance_surcharge_pct
+
+            total_surcharge += surcharge_monthly
+
+ 
+
+        # Flood insurance (if in flood zone)
+
+        flood_monthly = 0.0
+
+        if unit.in_flood_zone:
+
+            flood_base = ins_config.get("flood_zone_premium", 2500.0)
+
+            flood_inflation = ins_config.get("flood_zone_inflation_rate", 0.04)
+
+            flood_annual = flood_base * (1 + flood_inflation) ** (year - 1)
+
+            flood_monthly = flood_annual / 12.0
+
+            total_flood += flood_monthly
+
+ 
+
+        # Unit total
+
+        unit_total = base_premium_monthly + surcharge_monthly + flood_monthly
+
+ 
+
+        by_unit.append({
+
+            "unit_id": unit.unit_id,
+
+            "base_rate": inflated_rate,
+
+            "base_premium": base_premium_monthly,
+
+            "surcharge_pct": unit.insurance_surcharge_pct if month <= unit.insurance_surcharge_until_month else 0.0,
+
+            "surcharge_premium": surcharge_monthly,
+
+            "flood_premium": flood_monthly,
+
+            "total_premium": unit_total
+
+        })
+
+ 
+
+    return {
+
+        "base_premium": total_base,
+
+        "surcharge": total_surcharge,
+
+        "flood_premium": total_flood,
+
+        "total_premium": total_base + total_surcharge + total_flood,
+
+        "by_unit": by_unit
+
+    }
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- File: Create new `ob_str_engine/engine/insurance.py` (new module)
+
+- File: `ob_str_engine/engine/simulator.py` line ~180
+
+- Action: Replace flat `insurance = total_value × rate / 12` with call to new function
+
+- **Testing:** Compare v2.3 flat vs v2.4 inflating rates (7% annual growth is significant over 30 years)
+
+ 
+
+#### Insurance Claim Processing (Event-Driven)
+
+ 
+
+**Integration point:** `ob_str_engine/engine/events.py` (to be created in 1.3)
+
+ 
+
+**Logic:** When event with `insurance_claim` is triggered:
+
+ 
+
+```python
+
+def process_insurance_claim(event, units, config, operating_cash, month):
+
+    """
+
+    Process insurance claim from an event.
+
+ 
+
+    Returns:
+
+        tuple: (updated_operating_cash, claim_pending, surcharge_updates)
+
+    """
+
+    claim = event["insurance_claim"]
+
+    repair_cost = event["impacts"]["repair_cost"]
+
+ 
+
+    # Calculate covered amount
+
+    covered_amount = repair_cost * claim["coverage_pct"]
+
+    deductible_pct = claim["deductible_pct"]
+
+ 
+
+    # Determine deductible base (property value or repair cost?)
+
+    # For named storm: deductible is % of property value
+
+    # For other: deductible is % of repair cost
+
+    if event["type"] == "catastrophic":
+
+        # Named storm: deductible = % of current property value
+
+        if event["scope"] == "portfolio":
+
+            deductible_base = sum(u.value for u in units)
+
+        else:
+
+            unit = units[event["unit_id"]]
+
+            deductible_base = unit.value
+
+    else:
+
+        # Other claims: deductible = % of repair cost
+
+        deductible_base = repair_cost
+
+ 
+
+    deductible_amount = deductible_base * deductible_pct
+
+ 
+
+    # Out-of-pocket cost (paid immediately)
+
+    out_of_pocket = deductible_amount + (repair_cost - covered_amount)
+
+    operating_cash -= out_of_pocket
+
+ 
+
+    # Insurance payout (arrives later)
+
+    payout_amount = covered_amount - deductible_amount
+
+    payout_month = month + claim["payout_delay_months"]
+
+ 
+
+    claim_pending = {
+
+        "payout_amount": payout_amount,
+
+        "payout_month": payout_month,
+
+        "event_name": event["name"]
+
+    }
+
+ 
+
+    # Apply surcharge if applicable
+
+    surcharge_updates = []
+
+    if claim.get("triggers_surcharge", False):
+
+        market = config["market_profiles"][units[0].market_profile]  # Assume same market for simplicity
+
+        surcharge_config = market["expenses"]["insurance"]["claim_surcharge"]
+
+ 
+
+        increase_pct = surcharge_config["increase_pct"]
+
+        duration_years = surcharge_config["duration_years"]
+
+        surcharge_until_month = month + (duration_years * 12)
+
+ 
+
+        # Apply to all units in portfolio event, or just one unit
+
+        if event["scope"] == "portfolio":
+
+            affected_units = units
+
+        else:
+
+            affected_units = [units[event["unit_id"]]]
+
+ 
+
+        for unit in affected_units:
+
+            surcharge_updates.append({
+
+                "unit_id": unit.unit_id,
+
+                "surcharge_pct": increase_pct,
+
+                "surcharge_until_month": surcharge_until_month
+
+            })
+
+ 
+
+    return operating_cash, claim_pending, surcharge_updates
+
+```
+
+ 
+
+**Impact Analysis:**
+
+- Requires event system (1.3) to be implemented first
+
+- Insurance claim logic called from event processor
+
+- Modifies `operating_cash` (immediate deductible payment)
+
+- Creates pending payout (tracked in simulation state)
+
+- Updates `unit.insurance_surcharge_*` fields
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### Enhancements to Existing Pages
+
+ 
+
+**Page 1: Run Control & Config**
+
+ 
+
+Add to KPI cards:
+
+- **Insurance Rate**: "4.0% base + 1.2% surcharge = 5.2% effective"
+
+- **Flood Coverage**: "3 units in flood zone (+$7,500/yr)"
+
+ 
+
+**Page 3: Cash Flow Anatomy**
+
+ 
+
+Add expense breakdown rows:
+
+- "Base Insurance Premium"
+
+- "Insurance Surcharge (from claims)"
+
+- "Flood Insurance"
+
+- Total Insurance
+
+ 
+
+Add waterfall node: "Insurance Claim Payout" (positive inflow)
+
+ 
+
+**Page 4: Time Series Analysis**
+
+ 
+
+Add new metric options:
+
+- "Insurance Premium Total" (line chart, show base + surcharge stacked)
+
+- "Insurance Surcharge %" (line chart, % of base rate over time)
+
+- "Cumulative Deductibles Paid" (area chart)
+
+- "Insurance Claim Pending vs Received" (bar chart, show timing gap)
+
+ 
+
+**Page 5: Unit Comparison**
+
+ 
+
+Add columns:
+
+- "Flood Zone" (Yes/No badge)
+
+- "Insurance Rate" (base + surcharge)
+
+- "Deductibles Paid" (cumulative)
+
+ 
+
+#### New Dashboard Section: "Insurance Exposure"
+
+ 
+
+**Location:** Add tab to Page 4 (Time Series) or create new page
+
+ 
+
+**Purpose:** Visualize insurance risk and cost structure.
+
+ 
+
+**Components:**
+
+ 
+
+1. **Insurance Cost Trends**
+
+   - Line chart: Total insurance premium over 30 years
+
+   - Show base (green), surcharge (yellow), flood (blue) stacked
+
+   - Highlight claim events as vertical markers
+
+ 
+
+2. **Deductible Exposure Table**
+
+   - Per-unit deductible amounts (current property value × 2%)
+
+   - Portfolio total deductible exposure
+
+   - Callout: "If hurricane hits today, you'd pay $XX,XXX out-of-pocket"
+
+ 
+
+3. **Claim History & Projections**
+
+   - Table: All insurance claims (scheduled events)
+
+     - Columns: Year, Month, Event, Repair Cost, Deductible, Insurance Payout, Delay
+
+   - Total claims summary
+
+ 
+
+4. **Surcharge Timeline**
+
+   - Gantt chart: Show when surcharges are active per unit
+
+   - Example: "Unit 1 surcharge ends in Month 84, Unit 2 surcharge ends in Month 120"
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+#### 1. Expense Calculation (simulator.py)
+
+ 
+
+**File:** `ob_str_engine/engine/simulator.py`
+
+**Current line:** ~180 (operating expenses)
+
+ 
+
+**Current code:**
+
+```python
+
+# Property Insurance
+
+insurance = total_portfolio_value * cfg["constants"]["operations"]["insuranceRate"] / 12.0
+
+operating_cash -= insurance
+
+```
+
+ 
+
+**Updated code:**
+
+```python
+
+# Property Insurance (with market-specific rates, surcharges, flood)
+
+from ob_str_engine.engine.insurance import calculate_insurance_premium
+
+ 
+
+insurance_breakdown = calculate_insurance_premium(year, month, units, cfg)
+
+insurance_total = insurance_breakdown["total_premium"]
+
+operating_cash -= insurance_total
+
+ 
+
+# Store for output
+
+monthly_insurance_base = insurance_breakdown["base_premium"]
+
+monthly_insurance_surcharge = insurance_breakdown["surcharge"]
+
+monthly_insurance_flood = insurance_breakdown["flood_premium"]
+
+```
+
+ 
+
+**Impact:** Insurance calculation now unit-aware, market-aware, and time-varying.
+
+ 
+
+#### 2. Event Processing (events.py - to be created in 1.3)
+
+ 
+
+**File:** `ob_str_engine/engine/events.py` (new)
+
+**Function:** `process_monthly_events()`
+
+ 
+
+**Logic:** Check for insurance claims in triggered events, call `process_insurance_claim()`.
+
+ 
+
+**Integration:** Event system (1.3) will call insurance module when claim present.
+
+ 
+
+#### 3. Unit Creation (acquisition.py)
+
+ 
+
+**File:** `ob_str_engine/engine/acquisition.py`
+
+**Function:** `attempt_purchase()`
+
+ 
+
+**Updated code:**
+
+```python
+
+# When creating new unit, assign flood zone status
+
+# For now, default to False (not in flood zone)
+
+# Phase 2: Add per-property override or market default
+
+ 
+
+new_unit = Unit(
+
+    value=price_parity,
+
+    debt=debt,
+
+    monthly_payment=payment,
+
+    rate=rate,
+
+    last_refi_month=month,
+
+    unit_id=len(units),
+
+    cash_invested=down_payment + closing_costs,
+
+    purchase_month=month,
+
+    market_profile=default_market,
+
+ 
+
+    # NEW: Insurance fields
+
+    in_flood_zone=False,  # TODO: Make configurable per unit
+
+    insurance_surcharge_until_month=0,
+
+    insurance_surcharge_pct=0.0
+
+)
+
+```
+
+ 
+
+**Future Enhancement (Phase 2):**
+
+- Add `"flood_zone_probability": 0.3` to market profile
+
+- Randomly assign flood zone status at acquisition (Monte Carlo)
+
+- Or allow per-property override in config
+
+ 
+
+#### 4. Validation Framework
+
+ 
+
+**File:** `ob_str_engine/validation/checks.py`
+
+ 
+
+**New validations:**
+
+ 
+
+```python
+
+def validate_insurance_config(config: dict) -> ValidationResult:
+
+    """Ensure insurance config is reasonable."""
+
+    issues = []
+
+ 
+
+    for market_name, market in config.get("market_profiles", {}).items():
+
+        ins = market.get("expenses", {}).get("insurance", {})
+
+ 
+
+        # Check base rate
+
+        base_rate = ins.get("base_rate", 0.04)
+
+        if base_rate < 0.01 or base_rate > 0.10:
+
+            issues.append(f"{market_name}: base_rate {base_rate} seems unusual (expect 0.01-0.10)")
+
+ 
+
+        # Check deductible
+
+        deductible = ins.get("named_storm_deductible_pct", 0.02)
+
+        if deductible < 0.005 or deductible > 0.10:
+
+            issues.append(f"{market_name}: named_storm_deductible {deductible} seems unusual (expect 0.005-0.10)")
+
+ 
+
+        # Check surcharge duration
+
+        surcharge = ins.get("claim_surcharge", {})
+
+        duration = surcharge.get("duration_years", 5)
+
+        if duration < 1 or duration > 10:
+
+            issues.append(f"{market_name}: surcharge duration {duration} years seems unusual (expect 1-10)")
+
+ 
+
+    if issues:
+
+        return ValidationResult("insurance_config", "warning", f"{len(issues)} insurance config warnings", {"issues": issues})
+
+ 
+
+    return ValidationResult("insurance_config", "pass", "Insurance config looks reasonable", {})
+
+ 
+
+ 
+
+def validate_flood_zone_coverage(result: SimulationResult) -> ValidationResult:
+
+    """Warn if flood zone units but no flood premium."""
+
+    # Check if any units have in_flood_zone=True
+
+    # This requires extending units DataFrame to include flood zone flag
+
+    # Implementation depends on 1.3 event system completion
+
+    return ValidationResult("flood_zone_coverage", "skip", "Validation pending 1.3 completion", {})
+
+```
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.2.1: Market-Specific Insurance Rates**
+
+- [ ] Orange Beach market uses 4.0% base rate (not generic 3.3%)
+
+- [ ] Insurance premium inflates at 7% annually for coastal properties
+
+- [ ] Year 30 insurance premium is significantly higher than Year 1 (verify compound growth)
+
+- [ ] Generic market still uses 3.3% rate (backward compatibility)
+
+ 
+
+**AC-1.2.2: Named Storm Deductibles**
+
+- [ ] Hurricane event triggers 2% deductible (% of property value at time of claim)
+
+- [ ] Deductible is paid from operating cash immediately
+
+- [ ] Insurance payout arrives X months later (configurable delay)
+
+- [ ] Cumulative deductibles tracked in output
+
+ 
+
+**AC-1.2.3: Flood Insurance**
+
+- [ ] Unit in flood zone pays additional $2,500/year (inflated over time)
+
+- [ ] Unit not in flood zone pays $0 flood premium
+
+- [ ] Portfolio with 3 flood zone units shows $7,500/year total flood cost
+
+ 
+
+**AC-1.2.4: Insurance Claim Dynamics**
+
+- [ ] Claim processed correctly (deductible + uncovered costs paid immediately)
+
+- [ ] Payout delayed by specified months
+
+- [ ] Operating cash decreases at claim, increases at payout
+
+- [ ] No double-payment or lost funds
+
+ 
+
+**AC-1.2.5: Premium Increases After Claims**
+
+- [ ] After claim, insurance premium increases by 20% for 5 years
+
+- [ ] Surcharge expires after 5 years (premium returns to base + inflation)
+
+- [ ] Portfolio-wide event applies surcharge to all units in market
+
+- [ ] Per-unit event applies surcharge to only that unit
+
+ 
+
+**AC-1.2.6: Backward Compatibility**
+
+- [ ] v2.3 config without insurance section uses flat 3.3% rate
+
+- [ ] Simulation without events runs normally (no claims, no surcharges)
+
+- [ ] Output columns added, existing columns unchanged
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: Insurance Cost Over Time (No Claims)
+
+ 
+
+**Setup:**
+
+- Run 30-year simulation, OB market, 7 units
+
+- No events (baseline scenario)
+
+- 4% base rate, 7% annual inflation
+
+ 
+
+**Expected Results:**
+
+- Year 1 insurance: 7 units × $600k avg × 4% / 12 = $1,400/month
+
+- Year 10 insurance: 7 units × $806k × 7.61% / 12 ≈ $3,580/month (compounded inflation + appreciation)
+
+- Year 30 insurance: Significantly higher (verify exponential growth)
+
+ 
+
+**Pass Criteria:**
+
+- Insurance premium grows ~7% annually (regression check)
+
+- No surcharges (no claims)
+
+- Output matches manual calculation (within 1%)
+
+ 
+
+#### Test 2: Hurricane Claim with Surcharge
+
+ 
+
+**Setup:**
+
+- Event: Hurricane in Year 3, Month 9
+
+- Repair cost: $50,000
+
+- Coverage: 90%, Deductible: 2%, Payout delay: 4 months
+
+- Surcharge: 20% for 5 years
+
+ 
+
+**Expected Results:**
+
+- Month 33 (Year 3, Month 9):
+
+  - Property value: ~$650k (appreciated)
+
+  - Deductible: $650k × 2% = $13,000
+
+  - Uncovered: $50k × 10% = $5,000
+
+  - Out-of-pocket: $13k + $5k = $18,000 (paid from reserves)
+
+- Month 37 (4 months later):
+
+  - Insurance payout: $50k × 90% - $13k = $45k - $13k = $32,000 received
+
+- Months 33-93 (5 years):
+
+  - Insurance premium increases by 20%
+
+  - Month 34: Base $1,400 × 1.20 = $1,680/month
+
+- Month 94 onward:
+
+  - Surcharge expires, premium returns to base + inflation
+
+ 
+
+**Pass Criteria:**
+
+- Cash flow shows $18k drop at claim month
+
+- Cash flow shows $32k spike at payout month (4 months later)
+
+- Insurance premium chart shows 20% jump at claim month
+
+- Surcharge lasts exactly 60 months (5 years)
+
+ 
+
+#### Test 3: Flood Insurance Cost
+
+ 
+
+**Setup:**
+
+- 3 units in flood zone, 4 units not in flood zone
+
+- Flood premium: $2,500/year/unit
+
+- Flood inflation: 4% annually
+
+ 
+
+**Expected Results:**
+
+- Year 1 flood cost: 3 × $2,500 = $7,500/year = $625/month
+
+- Year 10 flood cost: 3 × ($2,500 × 1.04^9) ≈ $10,665/year = $889/month
+
+- Total insurance = base + surcharge + flood (all components sum correctly)
+
+ 
+
+**Pass Criteria:**
+
+- Portfolio total flood premium matches manual calculation
+
+- Units not in flood zone show $0 flood premium
+
+- Flood premium inflates correctly over time
+
+ 
+
+#### Test 4: Multiple Claims (Surcharge Overlap)
+
+ 
+
+**Setup:**
+
+- Event 1: Hurricane Year 3, triggers 20% surcharge for 5 years (until Year 8)
+
+- Event 2: Hurricane Year 6, triggers another 20% surcharge for 5 years (until Year 11)
+
+ 
+
+**Expected Results:**
+
+- Years 3-5: Surcharge = 20%
+
+- Years 6-8: Surcharges stack? Or cap? (Need business rule)
+
+- **Business Decision Required:** How to handle overlapping surcharges?
+
+  - **Option A**: Stack (20% + 20% = 40% total)
+
+  - **Option B**: Reset (new 20% starts, old expires)
+
+  - **Option C**: Cap (max 30% surcharge regardless of claims)
+
+ 
+
+**Recommendation:** Option B (reset) is most realistic. Second claim resets the 5-year clock.
+
+ 
+
+**Pass Criteria:**
+
+- Surcharge behavior matches chosen business rule
+
+- No calculation errors or infinite surcharges
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 2: Monte Carlo Randomization
+
+ 
+
+**Requirement:** MC runs will randomize insurance claim timing and severity.
+
+ 
+
+**Design Consideration:**
+
+- Current design: Events scheduled by year/month (deterministic)
+
+- Phase 2: Events have `"probability": 0.15` (15% annual hurricane chance)
+
+- MC engine samples event occurrence per run
+
+- No changes to claim processing logic needed
+
+ 
+
+**Action for Phase 1:**
+
+- Keep claim logic in dedicated `insurance.py` module
+
+- Ensure functions accept event parameters (not hardcoded values)
+
+- Document: "Phase 2: Events become probabilistic, claim logic unchanged"
+
+ 
+
+#### For Phase 3: Market Intelligence Integration
+
+ 
+
+**Requirement:** Pull live insurance quotes from APIs or manual entry.
+
+ 
+
+**Design Consideration:**
+
+- Add `"insurance_quotes"` section to config for per-property actual quotes
+
+- Override market defaults with actual quote data
+
+- Track quote expiration dates
+
+ 
+
+**Action for Phase 1:**
+
+- Use market-level defaults for now
+
+- In Phase 2, add optional per-unit overrides
+
+- Example:
+
+  ```json
+
+  {
+
+    "unit_overrides": [
+
+      {
+
+        "unit_id": 0,
+
+        "insurance_annual_premium": 3200.0,  // Actual quote
+
+        "quote_date": "2025-06-01",
+
+        "quote_expires": "2025-09-01"
+
+      }
+
+    ]
+
+  }
+
+  ```
+
+ 
+
+#### For Phase 6: Actual Performance Tracking
+
+ 
+
+**Requirement:** Track real insurance claims and premiums vs model.
+
+ 
+
+**Design Consideration:**
+
+- Output includes "Projected Insurance Premium" column
+
+- Phase 6 adds "Actual Insurance Premium" column (from bank statements)
+
+- Variance tracking: Actual vs Projected
+
+ 
+
+**Action for Phase 1:**
+
+- Ensure output columns are clearly named (e.g., "Insurance_Premium_Projected")
+
+- Leave room for "Insurance_Premium_Actual" in Phase 6
+
+ 
+
+---
+
+ 
+
+## 1.3 Event Modeling (Minor to Catastrophic)
+
+ 
+
+*(Continuing with detailed requirements for 1.3, 1.4, 1.5, 1.6, 1.7...)*
+
+ 
+
+**Note:** Due to length constraints, I'll continue writing the remaining sections (1.3-1.7) in this same document. The pattern established above will continue for each section with:
+
+- Functional Requirements
+
+- Data Model Changes
+
+- Calculation Logic
+
+- UI/Dashboard Requirements
+
+- Integration Points
+
+- Acceptance Criteria
+
+- Test Scenarios
+
+- Future-Proofing Guidance
+
+# Phase 1 Requirements - Sections 1.5, 1.6, 1.7 (Continuation)
+
+ 
+
+This file contains the continuation of PHASE_1_REQUIREMENTS.md for sections 1.5-1.7.
+
+These sections should be appended to the main requirements document.
+
+ 
+
+---
+
+ 
+
+## 1.5 Unit-Level CapEx Schedule
+
+ 
+
+**Goal:** Replace flat 10% CapEx reserve with realistic per-unit capital planning, tracking system age and replacement schedules.
+
+ 
+
+**Complexity:** Medium (M) - 5-7 days
+
+**Dependencies:** 1.3 (events for triggering scheduled replacements)
+
+**Priority:** P1 (High - important for realistic maintenance costs)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.5.1: Per-Unit System Tracking
+
+**User Story:** As a maintenance planner, I need to track the age and condition of major systems per property so that I can anticipate replacement costs.
+
+ 
+
+**System shall:**
+
+- Track age of major systems per unit:
+
+  - HVAC (heat/cool)
+
+  - Roof
+
+  - Appliances (dishwasher, fridge, stove, microwave, washer/dryer)
+
+  - Flooring
+
+  - Furniture/decor
+
+  - Water heater
+
+- Store expected lifespan for each system (configurable)
+
+- Calculate age relative to acquisition date
+
+- Allow manual override for system ages (Option B - from user preference)
+
+  - At acquisition: "HVAC is 5 years old, roof is new"
+
+  - Supports accurate projections based on inspection reports
+
+ 
+
+#### FR-1.5.2: Replacement Schedule Automation
+
+**User Story:** As a capital planner, I need automatic replacement scheduling so that I can forecast major expenditures.
+
+ 
+
+**System shall:**
+
+- Generate replacement schedule based on system age + expected lifespan
+
+- Trigger replacement events when system reaches end of life
+
+- Integrate with event system (1.3) - replacements are scheduled events
+
+- Support early replacement (before end of life) if desired
+
+- Track actual vs planned spending (Phase 6 integration point)
+
+ 
+
+#### FR-1.5.3: CapEx Reserve Management
+
+**User Story:** As a cash flow manager, I need CapEx reserves to fund replacements so that liquidity is maintained.
+
+ 
+
+**System shall:**
+
+- Continue 10% of gross revenue CapEx reserve contribution (existing logic)
+
+- Track CapEx reserve balance per-unit (new feature for future)
+
+  - **Phase 1**: Shared reserve pool (simpler)
+
+  - **Phase 2**: Per-unit reserves (more granular)
+
+- Funding waterfall when replacement needed (Option A + B from user preference):
+
+  1. Draw from CapEx reserve balance (if sufficient)
+
+  2. Draw from operating cash (if reserve depleted)
+
+  3. Flag liquidity warning if both insufficient
+
+- No reserve ceiling sweep in Phase 1 (keep simple; add in Phase 2 if needed)
+
+ 
+
+#### FR-1.5.4: Deferred Maintenance Tracking
+
+**User Story:** As a risk planner, I need to track deferred maintenance so that I understand portfolio condition risk.
+
+ 
+
+**System shall:**
+
+- Flag systems past expected lifespan as "overdue for replacement"
+
+- Track months of deferral beyond expected replacement date
+
+- Calculate "deferred maintenance liability" (sum of overdue replacement costs)
+
+- Warn if deferred maintenance exceeds threshold (e.g., >$50k or >10% of portfolio value)
+
+- Display in dashboard for visibility
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+#### Config JSON Schema Extensions
+
+ 
+
+**New section in `constants`: `capex_schedule`**
+
+ 
+
+```json
+
+{
+
+  "constants": {
+
+    "capex_schedule": {
+
+      "enabled": true,
+
+      "default_system_ages": {
+
+        "hvac": 0,
+
+        "roof": 0,
+
+        "appliances": 0,
+
+        "flooring": 0,
+
+        "furniture": 0,
+
+        "water_heater": 0
+
+      },
+
+      "expected_lifespans": {
+
+        "hvac": 15,
+
+        "roof": 25,
+
+        "appliances": 10,
+
+        "flooring": 7,
+
+        "furniture": 5,
+
+        "water_heater": 12
+
+      },
+
+      "replacement_costs": {
+
+        "hvac": 12000,
+
+        "roof": 25000,
+
+        "appliances": 8000,
+
+        "flooring": 10000,
+
+        "furniture": 15000,
+
+        "water_heater": 1500
+
+      },
+
+      "reserve_contribution_pct": 0.10,
+
+      "notes": "Replacement costs in current dollars, will inflate over time"
+
+    }
+
+  },
+
+ 
+
+  "unit_overrides": [
+
+    {
+
+      "unit_id": 0,
+
+      "system_ages": {
+
+        "hvac": 5,
+
+        "roof": 0,
+
+        "appliances": 3
+
+      },
+
+      "notes": "Per inspection report at purchase"
+
+    }
+
+  ]
+
+}
+
+```
+
+ 
+
+#### Unit Dataclass Extension
+
+ 
+
+```python
+
+@dataclass
+
+class Unit:
+
+    # ... (existing fields)
+
+ 
+
+    # NEW: CapEx tracking fields
+
+    system_ages: dict = None  # {"hvac": 5, "roof": 0, ...} (years at acquisition)
+
+    acquisition_year: int = 0  # Year purchased (for age calculation)
+
+    capex_reserve_allocated: float = 0.0  # Running CapEx reserve for this unit
+
+```
+
+ 
+
+**Note:** `system_ages` initialized at acquisition from config overrides or defaults.
+
+ 
+
+#### SimulationResult DataFrame Extensions
+
+ 
+
+**Monthly DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `CapEx_Reserve_Balance` | float | Current CapEx reserve balance (portfolio total) |
+
+| `CapEx_Contribution_This_Month` | float | 10% of gross revenue added to reserve |
+
+| `CapEx_Spending_This_Month` | float | Actual replacement costs paid this month |
+
+| `CapEx_Spending_Cumulative` | float | Total CapEx spent to date |
+
+| `Deferred_Maintenance_Liability` | float | Estimated cost of overdue replacements |
+
+ 
+
+**Units DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `Unit_HVAC_Age_Years` | int | Current age of HVAC system |
+
+| `Unit_Roof_Age_Years` | int | Current age of roof |
+
+| `Unit_Appliances_Age_Years` | int | Current age of appliances |
+
+| `Unit_Deferred_Systems` | str | Comma-separated list of overdue systems |
+
+| `Unit_Deferred_Liability` | float | Cost of overdue replacements for this unit |
+
+ 
+
+---
+
+ 
+
+### Calculation Logic & Formulas
+
+ 
+
+#### System Age Calculation
+
+ 
+
+```python
+
+def calculate_system_age(acquisition_year, current_year, initial_age):
+
+    """Calculate current age of a system."""
+
+    years_owned = current_year - acquisition_year
+
+    return initial_age + years_owned
+
+ 
+
+# Example:
+
+# Unit acquired Year 3, HVAC was 5 years old at purchase
+
+# Current year: 10
+
+# HVAC age: 5 + (10 - 3) = 12 years old
+
+```
+
+ 
+
+#### Replacement Trigger Detection
+
+ 
+
+```python
+
+def check_for_replacement_needs(unit, year, config):
+
+    """
+
+    Check if any systems are due for replacement.
+
+ 
+
+    Returns:
+
+        list: System names that need replacement
+
+    """
+
+    capex_config = config["constants"]["capex_schedule"]
+
+    lifespans = capex_config["expected_lifespans"]
+
+ 
+
+    systems_to_replace = []
+
+ 
+
+    for system, lifespan in lifespans.items():
+
+        current_age = calculate_system_age(
+
+            unit.acquisition_year,
+
+            year,
+
+            unit.system_ages.get(system, 0)
+
+        )
+
+ 
+
+        if current_age >= lifespan:
+
+            systems_to_replace.append(system)
+
+ 
+
+    return systems_to_replace
+
+```
+
+ 
+
+#### CapEx Funding Waterfall
+
+ 
+
+```python
+
+def fund_capex_expense(cost, capex_reserve, operating_cash):
+
+    """
+
+    Fund CapEx expense using waterfall logic.
+
+ 
+
+    Returns:
+
+        tuple: (updated_capex_reserve, updated_operating_cash, funded_amount, shortfall)
+
+    """
+
+    # Step 1: Draw from CapEx reserve
+
+    from_reserve = min(cost, capex_reserve)
+
+    capex_reserve -= from_reserve
+
+    remaining_cost = cost - from_reserve
+
+ 
+
+    # Step 2: Draw from operating cash if needed
+
+    from_operating = min(remaining_cost, operating_cash)
+
+    operating_cash -= from_operating
+
+    remaining_cost -= from_operating
+
+ 
+
+    funded_amount = from_reserve + from_operating
+
+    shortfall = remaining_cost
+
+ 
+
+    if shortfall > 0:
+
+        # Flag warning: Insufficient funds for CapEx
+
+        pass
+
+ 
+
+    return capex_reserve, operating_cash, funded_amount, shortfall
+
+```
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### New Dashboard Section: "CapEx Planning"
+
+ 
+
+**Location:** Add to Page 5 (Unit Comparison) or create new page
+
+ 
+
+**Sections:**
+
+ 
+
+1. **System Age Matrix**
+
+   - Table: All units × all systems
+
+   - Cells show: Current age / Expected lifespan (color-coded)
+
+   - Green: <50% of lifespan
+
+   - Yellow: 50-80% of lifespan
+
+   - Red: >80% of lifespan
+
+   - Black: Overdue
+
+ 
+
+2. **Replacement Timeline (Gantt Chart)**
+
+   - X-axis: Years 1-30
+
+   - Y-axis: Units
+
+   - Bars: Scheduled replacements (color by system type)
+
+   - Show clustering (years with high CapEx demand)
+
+ 
+
+3. **CapEx Reserve Projection**
+
+   - Line chart: CapEx reserve balance over time
+
+   - Overlay: Planned spending (bar chart)
+
+   - Highlight months where reserve goes negative (risk)
+
+ 
+
+4. **Deferred Maintenance Alert**
+
+   - Badge: "3 systems overdue, $37k liability"
+
+   - Table: Overdue systems with cost and months overdue
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+#### 1. Unit Creation (acquisition.py)
+
+ 
+
+```python
+
+# When creating new unit
+
+system_ages = get_system_ages_for_unit(unit_id, cfg)
+
+ 
+
+new_unit = Unit(
+
+    # ... (existing fields)
+
+    system_ages=system_ages,
+
+    acquisition_year=year,
+
+    capex_reserve_allocated=0.0
+
+)
+
+```
+
+ 
+
+#### 2. Monthly Loop (simulator.py)
+
+ 
+
+```python
+
+# Check for replacement needs
+
+for unit in units:
+
+    systems_due = check_for_replacement_needs(unit, year, cfg)
+
+ 
+
+    for system in systems_due:
+
+        # Create replacement event (or trigger existing scheduled event)
+
+        replacement_cost = get_replacement_cost(system, year, cfg)
+
+ 
+
+        # Fund from CapEx reserve, then operating cash
+
+        capex_reserve, operating_cash, funded, shortfall = fund_capex_expense(
+
+            replacement_cost, capex_reserve, operating_cash
+
+        )
+
+ 
+
+        if funded > 0:
+
+            # Reset system age
+
+            unit.system_ages[system] = 0
+
+```
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.5.1: System Age Tracking**
+
+- [ ] Each unit tracks ages of 6 major systems
+
+- [ ] Ages increase correctly year-over-year
+
+- [ ] Manual overrides at acquisition work (e.g., "HVAC is 5 years old")
+
+ 
+
+**AC-1.5.2: Replacement Scheduling**
+
+- [ ] Replacements trigger when system reaches expected lifespan
+
+- [ ] Replacement cost is deducted correctly
+
+- [ ] System age resets to 0 after replacement
+
+ 
+
+**AC-1.5.3: CapEx Reserve Funding**
+
+- [ ] Reserve funded from 10% of gross revenue monthly
+
+- [ ] Replacements draw from reserve first, then operating cash
+
+- [ ] Reserve balance tracked correctly over time
+
+ 
+
+**AC-1.5.4: Deferred Maintenance**
+
+- [ ] Systems past lifespan flagged as overdue
+
+- [ ] Deferred liability calculated correctly
+
+- [ ] Dashboard shows deferred systems clearly
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: HVAC Replacement on Schedule
+
+ 
+
+**Setup:**
+
+- Unit acquired Year 1, HVAC age 0
+
+- HVAC lifespan: 15 years
+
+- Replacement cost: $12,000
+
+ 
+
+**Expected:**
+
+- Year 16: HVAC replacement triggered
+
+- $12,000 deducted from CapEx reserve (or operating cash if insufficient)
+
+- HVAC age resets to 0
+
+ 
+
+**Pass Criteria:**
+
+- Replacement happens exactly in Year 16
+
+- Funding waterfall works correctly
+
+- System age resets
+
+ 
+
+#### Test 2: Multiple Concurrent Replacements
+
+ 
+
+**Setup:**
+
+- Year 10: HVAC ($12k), appliances ($8k), and water heater ($1.5k) all due
+
+- CapEx reserve balance: $15k
+
+ 
+
+**Expected:**
+
+- Total cost: $21,500
+
+- $15k from reserve, $6.5k from operating cash
+
+- All systems replaced, ages reset
+
+ 
+
+**Pass Criteria:**
+
+- All replacements occur same year
+
+- Funding waterfall applied correctly
+
+- Operating cash reduced by shortfall
+
+ 
+
+#### Test 3: Deferred Maintenance
+
+ 
+
+**Setup:**
+
+- HVAC due Year 16 but not replaced (insufficient funds or user delay)
+
+- Year 18: HVAC now 18 years old (3 years overdue)
+
+ 
+
+**Expected:**
+
+- Deferred maintenance flag shows HVAC overdue
+
+- Liability: $12,000 × inflation factor
+
+- Dashboard shows warning
+
+ 
+
+**Pass Criteria:**
+
+- Overdue system tracked correctly
+
+- Liability increases with time (inflation)
+
+- Warning displayed
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 2: Per-Unit CapEx Reserves
+
+ 
+
+**Requirement:** Allocate CapEx reserves per-unit for more granular tracking.
+
+ 
+
+**Design:**
+
+- Current: Portfolio-wide CapEx reserve pool
+
+- Phase 2: Each unit has dedicated reserve balance
+
+- Contribution: 10% of that unit's revenue → that unit's reserve
+
+ 
+
+**Action for Phase 1:**
+
+- Add `capex_reserve_allocated` field to Unit (already specified)
+
+- Phase 1: Leave at 0 (use portfolio pool)
+
+- Phase 2: Populate and track per-unit
+
+ 
+
+---
+
+ 
+
+## 1.6 Enhanced Financing Dashboard
+
+ 
+
+**Goal:** Provide deep visibility into debt structure, amortization, and refinancing opportunities.
+
+ 
+
+**Complexity:** Small (S) - 2-4 days
+
+**Dependencies:** None (UI-only enhancements to existing data)
+
+**Priority:** P2 (Medium - important for debt management)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.6.1: Portfolio Debt Overview
+
+**User Story:** As a debt manager, I need to see all portfolio debt at a glance so that I understand my obligations.
+
+ 
+
+**System shall:**
+
+- Display total portfolio debt (current balance)
+
+- Show weighted average interest rate
+
+- Calculate total monthly debt service
+
+- Show portfolio LTV (loan-to-value)
+
+- Display years to debt-free (based on current amortization + prepayments)
+
+ 
+
+#### FR-1.6.2: Per-Unit Debt Details
+
+**User Story:** As a property analyst, I need per-unit debt details so that I can compare performance.
+
+ 
+
+**System shall:**
+
+- Table: All units with debt metrics
+
+  - Unit ID, current debt, monthly payment, interest rate, LTV
+
+  - Months since last refi, eligible for refi (past cooldown)
+
+  - Extractable equity (value × 0.75 - debt)
+
+- Sort by LTV, debt balance, or payment amount
+
+- Export to CSV
+
+ 
+
+#### FR-1.6.3: Amortization Visualization
+
+**User Story:** As a debt strategist, I need to see how debt decreases over time so that I can plan prepayments.
+
+ 
+
+**System shall:**
+
+- Chart: Total portfolio debt over 30 years
+
+- Stacked area: Debt per unit (color-coded)
+
+- Show impact of prepayments (accelerated payoff)
+
+- Highlight refi events (debt increases)
+
+- Show feeder prepayment periods
+
+ 
+
+#### FR-1.6.4: Refinance Opportunity Analysis
+
+**User Story:** As a financing planner, I need to identify refi opportunities so that I can optimize costs.
+
+ 
+
+**System shall:**
+
+- Table: Units eligible for refinancing
+
+  - Past 3-year cooldown
+
+  - Current LTV < 75%
+
+  - Potential cash-out amount
+
+  - Interest savings (if refi rate < current rate)
+
+- "What-if" refi calculator:
+
+  - Input: Unit ID, new rate, new LTV
+
+  - Output: New payment, cash-out, break-even months
+
+- Show historical refi activity (timeline)
+
+ 
+
+#### FR-1.6.5: DSCR Tracking
+
+**User Story:** As a lender compliance officer, I need to track DSCR so that I ensure covenant compliance.
+
+ 
+
+**System shall:**
+
+- Calculate DSCR per unit: NOI / Debt Service
+
+- Portfolio DSCR: Total NOI / Total Debt Service
+
+- Chart: DSCR over time (per unit and portfolio)
+
+- Alert if DSCR < 1.25 (typical lender requirement)
+
+- Show headroom above minimum (e.g., "DSCR is 1.85, 0.60 above minimum")
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+**No new config or data structures needed.** This feature visualizes existing simulation output.
+
+ 
+
+**Existing data used:**
+
+- Units DataFrame: Debt, Payment, Rate, LTV, Last Refi Month
+
+- Monthly DataFrame: Total Debt, Total Payment, NOI, Debt Service
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### New Dashboard Page: "Debt & Financing Analysis"
+
+ 
+
+**Location:** Create `ui/pages/11_debt_financing.py`
+
+ 
+
+**Sections:**
+
+ 
+
+1. **Portfolio Debt Summary** (KPI Cards)
+
+   - Total Debt: $X.XXM
+
+   - Weighted Avg Rate: X.XX%
+
+   - Monthly Debt Service: $X,XXX
+
+   - Portfolio LTV: XX%
+
+   - Years to Debt-Free: XX years
+
+ 
+
+2. **Debt Amortization Chart**
+
+   - Stacked area: Total debt over time by unit
+
+   - Overlay: Prepayment events (feeder strategy milestones)
+
+   - Overlay: Refi events (debt increases)
+
+ 
+
+3. **Unit Debt Table**
+
+   - Columns: Unit, Debt, Payment, Rate, LTV, Extractable Equity, Refi Eligible
+
+   - Sortable, filterable
+
+   - Export CSV
+
+ 
+
+4. **Refinance Opportunities**
+
+   - Table: Eligible units with potential cash-out
+
+   - Button: "Run Refi Scenario" (opens calculator)
+
+ 
+
+5. **DSCR Monitoring**
+
+   - Chart: DSCR per unit over time (line chart)
+
+   - Chart: Portfolio DSCR (line chart)
+
+   - Alert box: "Unit 3 DSCR = 1.18 (below 1.25 minimum)" (if applicable)
+
+ 
+
+6. **What-If Refi Calculator**
+
+   - Inputs: Unit ID, new rate, new LTV, refi costs
+
+   - Outputs: New payment, cash-out, interest savings (annual), break-even months
+
+   - Button: "Apply to Scenario" (creates new scenario with refi applied)
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+**No backend changes needed.** All data already exists in simulation output.
+
+ 
+
+**UI Implementation:**
+
+- Read from `SimulationResult.units` DataFrame
+
+- Read from `SimulationResult.monthly` DataFrame
+
+- Calculate DSCR on-the-fly in UI
+
+- Refi calculator is UI-only (doesn't modify simulation)
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.6.1: Portfolio Debt Overview**
+
+- [ ] KPI cards show correct totals (match simulation output)
+
+- [ ] Weighted avg rate calculated correctly
+
+- [ ] Years to debt-free estimated reasonably
+
+ 
+
+**AC-1.6.2: Per-Unit Debt Table**
+
+- [ ] All units displayed with current debt metrics
+
+- [ ] Sortable by any column
+
+- [ ] Export CSV works
+
+ 
+
+**AC-1.6.3: Amortization Chart**
+
+- [ ] Debt decreases over time as expected
+
+- [ ] Prepayment events visible
+
+- [ ] Refi events show debt increases
+
+ 
+
+**AC-1.6.4: Refi Opportunity Analysis**
+
+- [ ] Eligible units identified correctly (past cooldown, LTV < 75%)
+
+- [ ] Cash-out amounts match manual calculation
+
+- [ ] What-if calculator produces reasonable outputs
+
+ 
+
+**AC-1.6.5: DSCR Tracking**
+
+- [ ] DSCR calculated correctly per unit
+
+- [ ] Alerts trigger when DSCR < 1.25
+
+- [ ] Chart shows trends over time
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: Portfolio Debt Summary
+
+ 
+
+**Setup:**
+
+- 3 units, varying debt balances
+
+- Rates: 6.85%, 5.875%, 6.5%
+
+ 
+
+**Expected:**
+
+- Total debt = sum of all units
+
+- Weighted avg rate = (debt1×rate1 + debt2×rate2 + debt3×rate3) / total_debt
+
+ 
+
+**Pass Criteria:**
+
+- KPI cards match manual calculation (within $1)
+
+ 
+
+#### Test 2: Refi Eligibility Detection
+
+ 
+
+**Setup:**
+
+- Unit 1: Last refi Month 12, current month 48 (3 years elapsed, eligible)
+
+- Unit 2: Last refi Month 24, current month 48 (2 years elapsed, not eligible)
+
+ 
+
+**Expected:**
+
+- Unit 1 shows "Eligible for Refi: Yes"
+
+- Unit 2 shows "Eligible for Refi: No (wait 12 more months)"
+
+ 
+
+**Pass Criteria:**
+
+- Cooldown logic correct
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 2: Monte Carlo Integration
+
+ 
+
+**Requirement:** MC runs may randomize interest rates.
+
+ 
+
+**Design:**
+
+- Show distribution of weighted avg rate across MC runs
+
+- "50% of scenarios have rate between X% and Y%"
+
+ 
+
+**Action for Phase 1:**
+
+- Design charts to support distribution overlays (box plots, percentile bands)
+
+ 
+
+---
+
+ 
+
+## 1.7 Exit Strategy Modeling
+
+ 
+
+**Goal:** Model portfolio liquidation scenarios (staggered unit sales or full portfolio sale) with proceeds calculation.
+
+ 
+
+**Complexity:** Medium (M) - 4-6 days
+
+**Dependencies:** 1.3 (events for sale triggers), 1.4 (tax for depreciation recapture warnings)
+
+**Priority:** P2 (Medium - important for long-term planning)
+
+ 
+
+### Functional Requirements
+
+ 
+
+#### FR-1.7.1: Unit Sale Event
+
+**User Story:** As an exit planner, I need to model selling individual units so that I can plan staggered exits.
+
+ 
+
+**System shall:**
+
+- Define unit sale as an event (integrates with 1.3 event system)
+
+- Sale event specifies:
+
+  - Unit ID to sell
+
+  - Sale year and month
+
+  - Sale price (or formula: current market value × multiplier)
+
+  - Selling costs (commission, closing costs)
+
+- Calculate sale proceeds:
+
+  - Gross proceeds = sale price
+
+  - Less: Agent commission (6% default)
+
+  - Less: Closing costs (2% default)
+
+  - Less: Remaining debt payoff
+
+  - Net proceeds = amount to owner
+
+- After sale:
+
+  - Remove unit from portfolio
+
+  - Net proceeds added to operating cash (or distributed)
+
+  - Continue simulation with remaining units
+
+ 
+
+#### FR-1.7.2: Portfolio Sale Event
+
+**User Story:** As an investor, I need to model selling the entire portfolio at once so that I can compare to staggered exit.
+
+ 
+
+**System shall:**
+
+- Portfolio sale = single event selling all units simultaneously
+
+- Support bulk sale discount (e.g., -5% for portfolio sale vs individual)
+
+- Calculate total proceeds:
+
+  - Sum of all unit values (with discount applied)
+
+  - Less: Total selling costs
+
+  - Less: Total remaining debt
+
+  - Net proceeds to owner
+
+- After portfolio sale:
+
+  - Simulation effectively ends (no more units)
+
+  - Final distribution of proceeds
+
+  - IRR calculation to sale date
+
+ 
+
+#### FR-1.7.3: Tax Implications (Warning Only)
+
+**User Story:** As a tax planner, I need warnings about depreciation recapture so that I consult my CPA.
+
+ 
+
+**System shall:**
+
+- **NOT calculate depreciation recapture** (out of scope per user preference)
+
+- **Display prominent warning**: "Unit sale may trigger depreciation recapture and capital gains. Estimated recapture: $XX,XXX (consult CPA for actual tax impact)."
+
+- Show cumulative depreciation claimed for unit being sold
+
+- Estimate gross capital gain (sale price - original purchase price)
+
+- **Clearly state**: "Tax impact not calculated. This is a 1031 exchange context. Consult tax professional."
+
+ 
+
+#### FR-1.7.4: Proceeds Allocation
+
+**User Story:** As a cash flow manager, I need to decide what to do with sale proceeds so that I can model reinvestment vs distribution.
+
+ 
+
+**System shall:**
+
+- Options for sale proceeds:
+
+  - **Option A**: Add to operating cash (reinvest in remaining portfolio)
+
+  - **Option B**: Distribute to owner (one-time distribution)
+
+  - **Option C**: 1031 exchange (placeholder - out of scope for Phase 1)
+
+- Track cumulative sale proceeds over simulation
+
+- Show final "cash out" amount at end of simulation
+
+ 
+
+#### FR-1.7.5: Exit Scenario Comparison
+
+**User Story:** As a strategy planner, I need to compare exit scenarios so that I can choose the optimal timing.
+
+ 
+
+**System shall:**
+
+- Define multiple exit scenarios:
+
+  - Scenario A: No sales (hold all 30 years)
+
+  - Scenario B: Sell Unit 1 in Year 15, rest in Year 20
+
+  - Scenario C: Sell all units in Year 25
+
+- Compare:
+
+  - Final net worth (portfolio value + cash)
+
+  - Total distributions received
+
+  - IRR to exit date
+
+  - Debt-free year (if applicable)
+
+- Visualize side-by-side comparison
+
+ 
+
+---
+
+ 
+
+### Data Model Changes
+
+ 
+
+#### Config JSON Schema Extensions
+
+ 
+
+**Add to `events` array:**
+
+ 
+
+```json
+
+{
+
+  "events": [
+
+    {
+
+      "name": "Sell Unit 1",
+
+      "type": "sale",
+
+      "year": 15,
+
+      "month": 6,
+
+      "scope": "unit",
+
+      "unit_id": 1,
+
+ 
+
+      "sale_details": {
+
+        "sale_price_multiplier": 1.0,
+
+        "commission_pct": 0.06,
+
+        "closing_cost_pct": 0.02,
+
+        "proceeds_allocation": "distribute"
+
+      },
+
+ 
+
+      "tax_warning": {
+
+        "show_warning": true,
+
+        "note": "1031 exchange context - tax not calculated"
+
+      }
+
+    },
+
+ 
+
+    {
+
+      "name": "Portfolio Sale",
+
+      "type": "portfolio_sale",
+
+      "year": 25,
+
+      "month": 12,
+
+      "scope": "portfolio",
+
+ 
+
+      "sale_details": {
+
+        "sale_price_multiplier": 0.95,
+
+        "commission_pct": 0.05,
+
+        "closing_cost_pct": 0.02,
+
+        "proceeds_allocation": "distribute"
+
+      }
+
+    }
+
+  ]
+
+}
+
+```
+
+ 
+
+#### SimulationResult DataFrame Extensions
+
+ 
+
+**Monthly DataFrame - New Columns:**
+
+ 
+
+| Column Name | Type | Description |
+
+|-------------|------|-------------|
+
+| `Units_Sold_This_Month` | int | Number of units sold this month |
+
+| `Sale_Gross_Proceeds` | float | Total sale price this month |
+
+| `Sale_Selling_Costs` | float | Commission + closing costs this month |
+
+| `Sale_Net_Proceeds` | float | After costs and debt payoff |
+
+| `Cumulative_Sale_Proceeds` | float | Total proceeds from all sales to date |
+
+ 
+
+**Units DataFrame:**
+
+- Unit marked as "sold" after sale event (removed from active units)
+
+ 
+
+---
+
+ 
+
+### Calculation Logic & Formulas
+
+ 
+
+#### Unit Sale Calculation
+
+ 
+
+```python
+
+def process_unit_sale(unit, sale_event, config):
+
+    """
+
+    Calculate proceeds from selling a unit.
+
+ 
+
+    Returns:
+
+        dict: Sale breakdown
+
+    """
+
+    sale_details = sale_event["sale_details"]
+
+ 
+
+    # Sale price
+
+    multiplier = sale_details.get("sale_price_multiplier", 1.0)
+
+    sale_price = unit.value * multiplier
+
+ 
+
+    # Selling costs
+
+    commission_pct = sale_details.get("commission_pct", 0.06)
+
+    closing_pct = sale_details.get("closing_cost_pct", 0.02)
+
+ 
+
+    commission = sale_price * commission_pct
+
+    closing_costs = sale_price * closing_pct
+
+    total_costs = commission + closing_costs
+
+ 
+
+    # Debt payoff
+
+    debt_payoff = unit.debt
+
+ 
+
+    # Net proceeds
+
+    net_proceeds = sale_price - total_costs - debt_payoff
+
+ 
+
+    # Tax warning (depreciation recapture)
+
+    cumulative_depreciation = unit.cumulative_depreciation
+
+    capital_gain = sale_price - unit.purchase_price
+
+ 
+
+    return {
+
+        "unit_id": unit.unit_id,
+
+        "sale_price": sale_price,
+
+        "commission": commission,
+
+        "closing_costs": closing_costs,
+
+        "debt_payoff": debt_payoff,
+
+        "net_proceeds": net_proceeds,
+
+        "cumulative_depreciation": cumulative_depreciation,
+
+        "capital_gain": capital_gain,
+
+        "tax_warning": f"Estimated recapture: ${cumulative_depreciation:,.0f}. Consult CPA."
+
+    }
+
+```
+
+ 
+
+---
+
+ 
+
+### UI/Dashboard Requirements
+
+ 
+
+#### New Dashboard Page: "Exit Strategy Planning"
+
+ 
+
+**Location:** Create `ui/pages/12_exit_strategy.py`
+
+ 
+
+**Sections:**
+
+ 
+
+1. **Exit Scenario Selector**
+
+   - Dropdown: Choose scenario (No Sales, Staggered, Portfolio Sale Year X)
+
+   - Button: "Add New Exit Scenario"
+
+   - Button: "Compare Scenarios"
+
+ 
+
+2. **Sale Event Timeline**
+
+   - Gantt chart: Scheduled sales on timeline
+
+   - Color-coded by type (unit sale vs portfolio sale)
+
+   - Show proceeds amount on hover
+
+ 
+
+3. **Sale Proceeds Calculator**
+
+   - Table: All scheduled sales
+
+   - Columns: Year, Month, Unit(s), Sale Price, Costs, Debt Payoff, Net Proceeds
+
+   - Total row: Cumulative proceeds
+
+ 
+
+4. **Exit Scenario Comparison**
+
+   - Side-by-side table:
+
+     - Scenario A: Final net worth, IRR, total distributions
+
+     - Scenario B: Final net worth, IRR, total distributions
+
+     - Scenario C: Final net worth, IRR, total distributions
+
+   - Chart: Net worth over time (line per scenario)
+
+ 
+
+5. **Tax Warning Banner**
+
+   - "Sales may trigger depreciation recapture and capital gains tax. Estimated recapture: $XXX,XXX across all sales. This model assumes 1031 exchange context. Consult tax professional for actual impact."
+
+ 
+
+---
+
+ 
+
+### Integration Points
+
+ 
+
+#### 1. Event System (events.py)
+
+ 
+
+**Add sale event processor:**
+
+ 
+
+```python
+
+def process_sale_event(event, units, operating_cash, month, config):
+
+    """
+
+    Process a unit or portfolio sale event.
+
+ 
+
+    Returns:
+
+        tuple: (updated_units, updated_operating_cash, sale_proceeds)
+
+    """
+
+    if event["scope"] == "unit":
+
+        # Sell single unit
+
+        unit_id = event["unit_id"]
+
+        unit = units[unit_id]
+
+ 
+
+        sale_breakdown = process_unit_sale(unit, event, config)
+
+ 
+
+        # Remove unit from portfolio
+
+        units = [u for u in units if u.unit_id != unit_id]
+
+ 
+
+        # Add net proceeds to cash (or distribute)
+
+        if event["sale_details"]["proceeds_allocation"] == "distribute":
+
+            # Trigger distribution
+
+            pass
+
+        else:
+
+            operating_cash += sale_breakdown["net_proceeds"]
+
+ 
+
+    elif event["scope"] == "portfolio":
+
+        # Sell all units
+
+        total_proceeds = 0
+
+        for unit in units:
+
+            sale_breakdown = process_unit_sale(unit, event, config)
+
+            total_proceeds += sale_breakdown["net_proceeds"]
+
+ 
+
+        # Clear portfolio
+
+        units = []
+
+ 
+
+        # Distribute proceeds
+
+        operating_cash += total_proceeds
+
+ 
+
+    return units, operating_cash, total_proceeds
+
+```
+
+ 
+
+---
+
+ 
+
+### Acceptance Criteria
+
+ 
+
+**AC-1.7.1: Unit Sale Event**
+
+- [ ] Unit sale event triggers in specified year/month
+
+- [ ] Sale proceeds calculated correctly (price - costs - debt)
+
+- [ ] Unit removed from portfolio after sale
+
+- [ ] Net proceeds added to cash or distributed
+
+ 
+
+**AC-1.7.2: Portfolio Sale Event**
+
+- [ ] Portfolio sale sells all units simultaneously
+
+- [ ] Bulk discount applied correctly
+
+- [ ] Total proceeds match sum of individual sales (with discount)
+
+ 
+
+**AC-1.7.3: Tax Warning**
+
+- [ ] Depreciation recapture warning displayed prominently
+
+- [ ] Cumulative depreciation shown per unit
+
+- [ ] Capital gain estimate shown
+
+- [ ] "Consult CPA" disclaimer present
+
+ 
+
+**AC-1.7.4: Proceeds Allocation**
+
+- [ ] Proceeds allocation options work (distribute vs reinvest)
+
+- [ ] Cumulative sale proceeds tracked over time
+
+ 
+
+**AC-1.7.5: Exit Scenario Comparison**
+
+- [ ] Multiple exit scenarios can be defined
+
+- [ ] Side-by-side comparison shows key metrics
+
+- [ ] IRR calculated correctly to exit date
+
+ 
+
+---
+
+ 
+
+### Test Scenarios
+
+ 
+
+#### Test 1: Single Unit Sale
+
+ 
+
+**Setup:**
+
+- Sell Unit 1 in Year 15
+
+- Unit value at sale: $900,000
+
+- Remaining debt: $200,000
+
+- Commission: 6%, Closing: 2%
+
+ 
+
+**Expected:**
+
+- Sale price: $900,000
+
+- Commission: $54,000
+
+- Closing: $18,000
+
+- Debt payoff: $200,000
+
+- Net proceeds: $900k - $54k - $18k - $200k = $628,000
+
+ 
+
+**Pass Criteria:**
+
+- Calculation matches manual
+
+- Unit removed from portfolio
+
+- Proceeds added to cash
+
+ 
+
+#### Test 2: Portfolio Sale with Bulk Discount
+
+ 
+
+**Setup:**
+
+- Year 25: 7 units, avg value $1.2M each
+
+- Total value: $8.4M
+
+- Bulk discount: 5% (sale price = $8.4M × 0.95 = $7.98M)
+
+- Total debt: $1.5M
+
+- Costs: 5% commission + 2% closing = 7% × $7.98M = $558,600
+
+ 
+
+**Expected:**
+
+- Gross: $7,980,000
+
+- Costs: $558,600
+
+- Debt: $1,500,000
+
+- Net proceeds: $7.98M - $0.56M - $1.5M = $5,921,400
+
+ 
+
+**Pass Criteria:**
+
+- Bulk discount applied
+
+- All units sold simultaneously
+
+- Simulation ends after sale (no units remaining)
+
+ 
+
+---
+
+ 
+
+### Future-Proofing Guidance
+
+ 
+
+#### For Phase 3: 1031 Exchange Modeling
+
+ 
+
+**Requirement:** Model reinvestment of proceeds into new properties (1031 exchange).
+
+ 
+
+**Design:**
+
+- Sale proceeds → reinvest in new property within 180 days
+
+- No tax due (deferred via 1031)
+
+- New property basis = old property basis (for depreciation)
+
+ 
+
+**Action for Phase 1:**
+
+- Proceeds allocation = "1031_exchange" (placeholder, not implemented)
+
+- Phase 3: Build exchange logic
+
+ 
+
+---
+
+ 
+
+## Implementation Summary & Handoff Notes
+
+ 
+
+### Critical Path for Implementation
+
+ 
+
+**Recommended order:**
+
+ 
+
+1. **Start with 1.1 Seasonality** (foundation for revenue)
+
+2. **Parallel: 1.4 Tax** (independent, can run alongside 1.1)
+
+3. **After 1.1 complete: 1.2 Insurance** (depends on market profiles)
+
+4. **After 1.1 + 1.2: 1.3 Events** (integrates both)
+
+5. **Parallel with 1.3: 1.5 CapEx** (can start once event schema defined)
+
+6. **Anytime: 1.6 Financing Dashboard** (UI-only, no dependencies)
+
+7. **After 1.3 + 1.4: 1.7 Exit Strategy** (needs events + tax warnings)
+
+ 
+
+### Key Technical Decisions
+
+ 
+
+1. **Backward Compatibility:** All features opt-in via config. v2.3 configs run unchanged.
+
+2. **Event System:** Centralized in `events.py`, integrates with revenue (1.1), insurance (1.2), CapEx (1.5), and exits (1.7).
+
+3. **Market Profiles:** Extensible design supports OB + future markets without rework.
+
+4. **Tax Modeling:** Deliberately scoped as estimates (not tax software). CPA handoff emphasized.
+
+5. **CapEx:** Waterfall funding (reserve → operating cash) prevents liquidity crises.
+
+ 
+
+### Testing Strategy
+
+ 
+
+- Unit tests for all calculation functions (seasonality multipliers, depreciation, event processing)
+
+- Integration tests for end-to-end scenarios (hurricane + insurance claim + recovery)
+
+- Regression tests to ensure v2.3 baseline still works
+
+- Manual QA for UI components (dashboards, charts, exports)
+
+ 
+
+### Code Quality Standards
+
+ 
+
+- Type hints on all new functions
+
+- Docstrings with Args/Returns/Examples
+
+- Validation checks for all new config sections
+
+- Error handling with user-friendly messages
+
+- Logging for debugging (not verbose in production)
+
+ 
+
+### Documentation to Update
+
+ 
+
+- Update `docs/README.md` with Phase 1 features
+
+- Add examples to `docs/QUICKSTART.md` (how to use seasonality, events, etc.)
+
+- Create migration guide for v2.3 → v2.4 users
+
+- Export CPA package README with field definitions
+
+ 
+
+---
+
+ 
+
+## Final Checklist Before Handoff
+
+ 
+
+### Configuration Schema
+
+- [ ] All new JSON sections documented with examples
+
+- [ ] Default values specified for all fields
+
+- [ ] Validation logic defined for each new section
+
+ 
+
+### Data Model
+
+- [ ] Unit dataclass extensions documented
+
+- [ ] DataFrame columns listed with types and descriptions
+
+- [ ] Runtime state structures defined (e.g., EventRecoveryState)
+
+ 
+
+### Calculation Logic
+
+- [ ] All formulas written in pseudocode or Python
+
+- [ ] Edge cases identified (e.g., multiple concurrent events)
+
+- [ ] Integration points specified with file/line references
+
+ 
+
+### UI/Dashboard
+
+- [ ] New pages listed with section breakdowns
+
+- [ ] Enhancements to existing pages documented
+
+- [ ] Export formats specified (CSV structure)
+
+ 
+
+### Testing
+
+- [ ] Test scenarios defined with setup/expected/pass criteria
+
+- [ ] Acceptance criteria written as checklists
+
+- [ ] Edge cases documented
+
+ 
+
+### Future-Proofing
+
+- [ ] Phase 2 integration points identified
+
+- [ ] Extensibility guidance provided
+
+- [ ] Avoid rework guidance documented
+
+ 
+
+---
+
+ 
+
+**END OF PHASE 1 REQUIREMENTS**
+
+ 
+
+*Total Pages: ~150 (estimated)*
+
+*Total Effort: 38-56 days*
+
+*Priority: P0 (1.1, 1.2, 1.3), P1 (1.4, 1.5), P2 (1.6, 1.7)*
